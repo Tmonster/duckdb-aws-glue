@@ -9,7 +9,8 @@ namespace duckdb {
 class GlueTable;
 
 //! Writes rows into a Hive table registered in Glue: a parquet COPY into the table location (one <key=value>
-//! directory level per partition key), then the new partition directories are registered in Glue.
+//! directory level per partition key), then the new partition directories and the statistics of the written files
+//! are registered in Glue.
 class GlueHiveInsert : public PhysicalOperator {
 public:
 	GlueHiveInsert(PhysicalPlan &physical_plan, LogicalOperator &op, GlueTable &table, bool discard);
@@ -54,6 +55,8 @@ public:
 	GlueTable &table;
 	//! CREATE TABLE IF NOT EXISTS ... AS on an existing table: consume the input and write nothing
 	bool discard;
+	//! Record the numRows, numFiles and totalSize of the written files in Glue (parquet only)
+	bool collect_statistics = false;
 };
 
 } // namespace duckdb

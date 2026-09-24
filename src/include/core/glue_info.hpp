@@ -99,10 +99,20 @@ public:
 	string GetEscapeCharacter() const;
 };
 
+//! Hive's basic statistics of a table or partition, stored as its numRows, numFiles and totalSize parameters
+struct GlueBasicStatistics {
+	idx_t num_rows = 0;
+	idx_t num_files = 0;
+	idx_t total_size = 0;
+};
+
 //! A partition of a Hive table to register: the partition values (in partition key order) and its location
 struct GluePartitionInput {
 	vector<string> values;
 	string location;
+	//! The files written to the partition: its statistics when it is new, added to them when it exists
+	bool has_statistics = false;
+	GlueBasicStatistics statistics;
 };
 
 //! A partition of a Hive table as registered in Glue: the partition values (in partition key order, as strings)
@@ -110,6 +120,7 @@ struct GluePartitionInput {
 struct GluePartitionInfo {
 	vector<string> values;
 	string location;
+	unordered_map<string, string> parameters;
 };
 
 } // namespace duckdb
