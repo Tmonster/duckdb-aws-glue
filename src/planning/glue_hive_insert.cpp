@@ -281,14 +281,18 @@ PhysicalOperator &GlueHiveInsert::PlanWrite(ClientContext &context, PhysicalPlan
 		copy.write_empty_file = true;
 		copy.per_thread_output = false;
 	} else {
+		// a rotation limit that is never reached makes the copy create files in the directory, named from
+		// filename_pattern when they get their first rows
+		// TODO: use a real file_size_bytes limit instead once the avro copy function supports file_size_bytes
 		copy.file_path = location;
+		copy.batches_per_file = NumericLimits<idx_t>::Maximum() - 1;
 		copy.partition_output = false;
 		copy.write_empty_file = false;
-		copy.per_thread_output = true;
+		// not per-thread output: it writes a file even for an insert of no rows
+		copy.per_thread_output = false;
 	}
 	copy.file_extension = format_name;
 	copy.overwrite_mode = CopyOverwriteMode::COPY_OVERWRITE_OR_IGNORE;
-	copy.per_thread_output = false;
 	copy.return_type = return_type;
 	copy.names = copy_names;
 	copy.expected_types = copy_types;

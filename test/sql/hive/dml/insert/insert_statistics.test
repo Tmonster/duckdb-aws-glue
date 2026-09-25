@@ -52,10 +52,11 @@ statement ok
 INSERT INTO my_datalake.default.stats_plain SELECT i, 'name_' || i FROM range(5) t(i);
 
 query II
-SELECT parameters['numRows'], parameters['numFiles']
+SELECT parameters['numRows'], parameters['numFiles']::BIGINT = (
+    SELECT count(*) FROM glob('{DEFAULT_S3_LOCATION}/{TEST_DIR}/default/stats_plain/*.parquet'))
 FROM glue_get_table_response('my_datalake.default.stats_plain');
 ----
-5	1
+5	true
 
 # totalSize is the size of the written files
 query I
@@ -69,10 +70,11 @@ statement ok
 INSERT INTO my_datalake.default.stats_plain VALUES (10, 'ten'), (11, 'eleven'), (12, 'twelve');
 
 query II
-SELECT parameters['numRows'], parameters['numFiles']
+SELECT parameters['numRows'], parameters['numFiles']::BIGINT = (
+    SELECT count(*) FROM glob('{DEFAULT_S3_LOCATION}/{TEST_DIR}/default/stats_plain/*.parquet'))
 FROM glue_get_table_response('my_datalake.default.stats_plain');
 ----
-8	2
+8	true
 
 query I
 SELECT parameters['totalSize']::BIGINT = (
@@ -91,10 +93,11 @@ statement ok
 INSERT INTO my_datalake.default.stats_plain SELECT i, 'x' FROM range(5) t(i) WHERE i > 100;
 
 query II
-SELECT parameters['numRows'], parameters['numFiles']
+SELECT parameters['numRows'], parameters['numFiles']::BIGINT = (
+    SELECT count(*) FROM glob('{DEFAULT_S3_LOCATION}/{TEST_DIR}/default/stats_plain/*.parquet'))
 FROM glue_get_table_response('my_datalake.default.stats_plain');
 ----
-8	2
+8	true
 
 # moving the table drops the statistics: they describe the files at the old location
 statement ok
@@ -264,10 +267,11 @@ statement ok
 CREATE TABLE my_datalake.default.stats_ctas AS SELECT i AS id FROM range(42) t(i);
 
 query II
-SELECT parameters['numRows'], parameters['numFiles']
+SELECT parameters['numRows'], parameters['numFiles']::BIGINT = (
+    SELECT count(*) FROM glob('{DEFAULT_S3_LOCATION}/{TEST_DIR}/default/stats_ctas/*.parquet'))
 FROM glue_get_table_response('my_datalake.default.stats_ctas');
 ----
-42	1
+42	true
 
 statement ok
 CREATE TABLE my_datalake.default.stats_ctas_parts PARTITIONED BY (bucket) AS
