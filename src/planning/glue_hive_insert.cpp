@@ -250,7 +250,7 @@ PhysicalOperator &GlueHiveInsert::PlanCreateTableAs(ClientContext &context, Phys
 //===--------------------------------------------------------------------===//
 // Execution
 //===--------------------------------------------------------------------===//
-struct GlueHiveWrittenFile {
+struct HiveWrittenFile {
 	string path;
 	idx_t row_count = 0;
 	idx_t file_size = 0;
@@ -259,7 +259,7 @@ struct GlueHiveWrittenFile {
 struct GlueHiveInsertGlobalState : public GlobalSinkState {
 	mutex lock;
 	idx_t insert_count = 0;
-	vector<GlueHiveWrittenFile> written_files;
+	vector<HiveWrittenFile> written_files;
 };
 
 unique_ptr<GlobalSinkState> GlueHiveInsert::GetGlobalSinkState(ClientContext &context) const {
@@ -275,7 +275,7 @@ SinkResultType GlueHiveInsert::Sink(ExecutionContext &context, DataChunk &chunk,
 	if (collect_statistics) {
 		// the COPY reports one row per file: (path, rows, bytes, ...)
 		for (idx_t r = 0; r < chunk.size(); r++) {
-			GlueHiveWrittenFile file;
+			HiveWrittenFile file;
 			file.path = chunk.GetValue(0, r).GetValue<string>();
 			file.row_count = chunk.GetValue(1, r).GetValue<idx_t>();
 			file.file_size = chunk.GetValue(2, r).GetValue<idx_t>();
@@ -292,7 +292,7 @@ SinkResultType GlueHiveInsert::Sink(ExecutionContext &context, DataChunk &chunk,
 			continue;
 		}
 		for (auto &file : ListValue::GetChildren(files)) {
-			GlueHiveWrittenFile written_file;
+			HiveWrittenFile written_file;
 			written_file.path = file.GetValue<string>();
 			state.written_files.push_back(std::move(written_file));
 		}

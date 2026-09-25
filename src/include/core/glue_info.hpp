@@ -99,6 +99,9 @@ public:
 	string GetEscapeCharacter() const;
 };
 
+//! The key/value parameters of a Glue table or partition
+using GlueParameters = unordered_map<string, string>;
+
 //! Hive's basic statistics of a table or partition, stored as its numRows, numFiles and totalSize parameters
 struct GlueBasicStatistics {
 	idx_t num_rows = 0;
@@ -120,7 +123,7 @@ struct GluePartitionInput {
 struct GluePartitionInfo {
 	vector<string> values;
 	string location;
-	unordered_map<string, string> parameters;
+	GlueParameters parameters;
 };
 
 } // namespace duckdb

@@ -47,9 +47,9 @@ void GlueAPI::SetPartitionLocation(ClientContext &context, GlueCatalog &catalog,
 	input.SetValues(partition.GetValues());
 	input.SetStorageDescriptor(storage_descriptor);
 	// the statistics describe the files at the old location
-	auto parameters = partition.GetParameters();
+	auto parameters = ToStdMap(partition.GetParameters());
 	RemoveBasicStatistics(parameters);
-	input.SetParameters(parameters);
+	input.SetParameters(ToAwsMap(parameters));
 	Aws::Glue::Model::UpdatePartitionRequest request;
 	SetCatalogId(request, catalog);
 	request.SetDatabaseName(database_name);
@@ -82,9 +82,7 @@ bool GlueAPI::GetPartition(ClientContext &context, GlueCatalog &catalog, const s
 	}
 	auto &partition = outcome.GetResult().GetPartition();
 	result.values.clear();
-	for (auto &value : partition.GetValues()) {
-		result.values.push_back(ToStdString(value));
-	}
+	result.values = ToStdValues(partition.GetValues());
 	result.location = ToStdString(partition.GetStorageDescriptor().GetLocation());
 	result.parameters = ToStdMap(partition.GetParameters());
 	return true;
@@ -210,6 +208,10 @@ void GlueAPI::RenamePartition(ClientContext &context, GlueCatalog &catalog, cons
 	}
 }
 
+static string PartitionKey(const vector<string> &values) {
+	return StringUtil::Join(values, "\x1f");
+}
+
 //! The partitions Glue returns per request. 1000 is the maximum the API allows.
 static constexpr int GLUE_PARTITIONS_PAGE_SIZE = 1000;
 //! The requests to run at the same time when the catalog is AWS and the setting leaves the choice open
@@ -248,9 +250,7 @@ static void FetchPartitionSegment(Aws::Glue::GlueClient &client, const GlueCatal
 		auto &partitions = outcome.GetResult();
 		for (auto &partition : partitions.GetPartitions()) {
 			GluePartitionInfo info;
-			for (auto &value : partition.GetValues()) {
-				info.values.push_back(ToStdString(value));
-			}
+			info.values = ToStdValues(partition.GetValues());
 			info.location = ToStdString(partition.GetStorageDescriptor().GetLocation());
 			info.parameters = ToStdMap(partition.GetParameters());
 			result.push_back(std::move(info));
@@ -324,7 +324,7 @@ vector<GluePartitionInfo> GlueAPI::GetPartitions(ClientContext &context, GlueCat
 		for (auto &partition : segment_result) {
 			// A Glue compatible server that ignores Segment answers every segment with the whole table: the values
 			// identify the partition, so what was seen already is dropped here
-			if (total_segments > 1 && !seen.insert(StringUtil::Join(partition.values, "\x1f")).second) {
+			if (total_segments > 1 && !seen.insert(PartitionKey(partition.values)).second) {
 				continue;
 			}
 			result.push_back(std::move(partition));
@@ -333,19 +333,9 @@ vector<GluePartitionInfo> GlueAPI::GetPartitions(ClientContext &context, GlueCat
 	return result;
 }
 
-static string PartitionKey(const Aws::Vector<Aws::String> &values) {
-	string result;
-	for (auto &value : values) {
-		result += ToStdString(value);
-		result += '\x1f';
-	}
-	return result;
-}
-
-static string TrimLocation(const Aws::String &location) {
-	auto result = ToStdString(location);
-	StringUtil::RTrim(result, "/");
-	return result;
+static string TrimLocation(string location) {
+	StringUtil::RTrim(location, "/");
+	return location;
 }
 
 //! Add the statistics of the given (existing) partitions to the statistics Glue has for them
@@ -358,7 +348,7 @@ static void AddPartitionStatistics(Aws::Glue::GlueClient &client, const GlueCata
 	constexpr idx_t MAX_GET_ATTEMPTS = 5;
 	unordered_map<string, reference<const GluePartitionInput>> inputs;
 	for (auto &partition : partitions) {
-		inputs.emplace(PartitionKey(ToAwsValues(partition.get().values)), partition);
+		inputs.emplace(PartitionKey(partition.get().values), partition);
 	}
 
 	Aws::Vector<Aws::Glue::Model::BatchUpdatePartitionRequestEntry> updates;
@@ -381,17 +371,17 @@ static void AddPartitionStatistics(Aws::Glue::GlueClient &client, const GlueCata
 				ThrowGlueError(outcome, StringUtil::Format("BatchGetPartition '%s.%s'", database_name, table_name));
 			}
 			for (auto &partition : outcome.GetResult().GetPartitions()) {
-				auto input = inputs.find(PartitionKey(partition.GetValues()));
+				auto input = inputs.find(PartitionKey(ToStdValues(partition.GetValues())));
 				if (input == inputs.end()) {
 					continue;
 				}
 				auto &partition_input = input->second.get();
 				// files written to a directory the partition does not point at do not count for it
 				auto &descriptor = partition.GetStorageDescriptor();
-				if (TrimLocation(descriptor.GetLocation()) != TrimLocation(partition_input.location)) {
+				if (TrimLocation(ToStdString(descriptor.GetLocation())) != TrimLocation(partition_input.location)) {
 					continue;
 				}
-				auto parameters = partition.GetParameters();
+				auto parameters = ToStdMap(partition.GetParameters());
 				GlueBasicStatistics statistics;
 				if (!TryGetBasicStatistics(parameters, statistics)) {
 					continue;
@@ -404,7 +394,7 @@ static void AddPartitionStatistics(Aws::Glue::GlueClient &client, const GlueCata
 				Aws::Glue::Model::PartitionInput update_input;
 				update_input.SetValues(partition.GetValues());
 				update_input.SetStorageDescriptor(descriptor);
-				update_input.SetParameters(parameters);
+				update_input.SetParameters(ToAwsMap(parameters));
 				if (partition.LastAccessTimeHasBeenSet()) {
 					update_input.SetLastAccessTime(partition.GetLastAccessTime());
 				}
@@ -433,12 +423,8 @@ static void AddPartitionStatistics(Aws::Glue::GlueClient &client, const GlueCata
 			ThrowGlueError(outcome, StringUtil::Format("BatchUpdatePartition '%s.%s'", database_name, table_name));
 		}
 		for (auto &error : outcome.GetResult().GetErrors()) {
-			vector<string> values;
-			for (auto &value : error.GetPartitionValueList()) {
-				values.push_back(ToStdString(value));
-			}
 			throw IOException("Glue BatchUpdatePartition '%s.%s' failed for partition [%s]: %s (%s)", database_name,
-			                  table_name, PartitionValuesToString(values),
+			                  table_name, PartitionValuesToString(ToStdValues(error.GetPartitionValueList())),
 			                  ToStdString(error.GetErrorDetail().GetErrorMessage()),
 			                  ToStdString(error.GetErrorDetail().GetErrorCode()));
 		}
@@ -480,10 +466,10 @@ void GlueAPI::BatchCreatePartitions(ClientContext &context, GlueCatalog &catalog
 			descriptor.SetLocation(partition.location);
 			input.SetStorageDescriptor(descriptor);
 			if (partition.has_statistics) {
-				Aws::Map<Aws::String, Aws::String> parameters;
+				GlueParameters parameters;
 				SetBasicStatistics(parameters, partition.statistics);
-				input.SetParameters(parameters);
-				batch_partitions.emplace(PartitionKey(input.GetValues()), partition);
+				input.SetParameters(ToAwsMap(parameters));
+				batch_partitions.emplace(PartitionKey(partition.values), partition);
 			}
 			inputs.push_back(std::move(input));
 		}
@@ -500,18 +486,14 @@ void GlueAPI::BatchCreatePartitions(ClientContext &context, GlueCatalog &catalog
 			auto code = ToStdString(error.GetErrorDetail().GetErrorCode());
 			if (code == "AlreadyExistsException") {
 				// appending to an existing partition
-				auto partition = batch_partitions.find(PartitionKey(error.GetPartitionValues()));
+				auto partition = batch_partitions.find(PartitionKey(ToStdValues(error.GetPartitionValues())));
 				if (partition != batch_partitions.end()) {
 					existing_with_statistics.push_back(partition->second);
 				}
 				continue;
 			}
-			vector<string> values;
-			for (auto &value : error.GetPartitionValues()) {
-				values.push_back(ToStdString(value));
-			}
 			throw IOException("Glue BatchCreatePartition '%s.%s' failed for partition [%s]: %s (%s)", database_name,
-			                  table_name, StringUtil::Join(values, ", "),
+			                  table_name, PartitionValuesToString(ToStdValues(error.GetPartitionValues())),
 			                  ToStdString(error.GetErrorDetail().GetErrorMessage()), code);
 		}
 	}

@@ -244,9 +244,9 @@ void GlueAPI::SetTableLocation(ClientContext &context, GlueCatalog &catalog, con
 		storage_descriptor.SetLocation(location);
 		table_input.SetStorageDescriptor(storage_descriptor);
 		// the statistics describe the files at the old location
-		auto parameters = table_input.GetParameters();
+		auto parameters = ToStdMap(table_input.GetParameters());
 		RemoveBasicStatistics(parameters);
-		table_input.SetParameters(parameters);
+		table_input.SetParameters(ToAwsMap(parameters));
 		return true;
 	});
 }
@@ -257,7 +257,7 @@ void GlueAPI::AddTableStatistics(ClientContext &context, GlueCatalog &catalog, c
 	GlueHttpClientContextScope http_scope(context);
 	auto client = GetClient(context, catalog);
 	UpdateGlueTable(client, catalog, database_name, table_name, [&](Aws::Glue::Model::TableInput &table_input) {
-		auto parameters = table_input.GetParameters();
+		auto parameters = ToStdMap(table_input.GetParameters());
 		GlueBasicStatistics current;
 		if (!TryGetBasicStatistics(parameters, current)) {
 			// unknown statistics stay unknown
@@ -267,7 +267,7 @@ void GlueAPI::AddTableStatistics(ClientContext &context, GlueCatalog &catalog, c
 		current.num_files += statistics.num_files;
 		current.total_size += statistics.total_size;
 		SetBasicStatistics(parameters, current);
-		table_input.SetParameters(parameters);
+		table_input.SetParameters(ToAwsMap(parameters));
 		return true;
 	});
 }
