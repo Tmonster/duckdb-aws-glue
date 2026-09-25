@@ -386,9 +386,9 @@ static void AddPartitionStatistics(Aws::Glue::GlueClient &client, const GlueCata
 				if (!TryGetBasicStatistics(parameters, statistics)) {
 					continue;
 				}
-				statistics.num_rows += partition_input.statistics.num_rows;
-				statistics.num_files += partition_input.statistics.num_files;
-				statistics.total_size += partition_input.statistics.total_size;
+				statistics.num_rows += partition_input.statistics->num_rows;
+				statistics.num_files += partition_input.statistics->num_files;
+				statistics.total_size += partition_input.statistics->total_size;
 				SetBasicStatistics(parameters, statistics);
 
 				Aws::Glue::Model::PartitionInput update_input;
@@ -465,9 +465,9 @@ void GlueAPI::BatchCreatePartitions(ClientContext &context, GlueCatalog &catalog
 			auto descriptor = table_descriptor;
 			descriptor.SetLocation(partition.location);
 			input.SetStorageDescriptor(descriptor);
-			if (partition.has_statistics) {
+			if (partition.statistics) {
 				GlueParameters parameters;
-				SetBasicStatistics(parameters, partition.statistics);
+				SetBasicStatistics(parameters, *partition.statistics);
 				input.SetParameters(ToAwsMap(parameters));
 				batch_partitions.emplace(PartitionKey(partition.values), partition);
 			}

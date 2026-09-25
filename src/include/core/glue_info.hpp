@@ -1,5 +1,6 @@
 #pragma once
 
+#include "duckdb/common/optional.hpp"
 #include "duckdb/common/string.hpp"
 #include "duckdb/common/vector.hpp"
 #include "duckdb/common/unordered_map.hpp"
@@ -114,8 +115,7 @@ struct GluePartitionInput {
 	vector<string> values;
 	string location;
 	//! The files written to the partition: its statistics when it is new, added to them when it exists
-	bool has_statistics = false;
-	GlueBasicStatistics statistics;
+	optional<GlueBasicStatistics> statistics;
 };
 
 //! A partition of a Hive table as registered in Glue: the partition values (in partition key order, as strings)
