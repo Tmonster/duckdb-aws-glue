@@ -202,26 +202,15 @@ void HiveMultiFileList::ListRoot(FileSystem &fs, const vector<idx_t> &partitions
 		if (hidden) {
 			continue;
 		}
-		// the deepest registered partition directory the file lies in; files outside every partition read (in
-		// unregistered or pruned directories) are skipped
+		// the partition whose location is the file's directory: as when a partition is listed on its own, only the
+		// files directly in it are its data. A file in a subdirectory belongs to the partition registered there, if
+		// that one is read, never to a partition above it; files in unregistered or pruned directories are skipped.
 		auto directory = file.path.substr(0, file.path.find_last_of('/'));
-		optional_idx partition_index;
-		while (directory.size() > root.size()) {
-			auto entry = partition_by_location.find(directory);
-			if (entry != partition_by_location.end()) {
-				partition_index = entry->second;
-				break;
-			}
-			auto parent = directory.find_last_of('/');
-			if (parent == string::npos) {
-				break;
-			}
-			directory = directory.substr(0, parent);
-		}
-		if (!partition_index.IsValid()) {
+		auto entry = partition_by_location.find(directory);
+		if (entry == partition_by_location.end()) {
 			continue;
 		}
-		AddFile(std::move(file), partition_index.GetIndex());
+		AddFile(std::move(file), entry->second);
 	}
 }
 
@@ -324,6 +313,18 @@ static const TableFunction &GetListReadFunction(ClientContext &context, const st
 	return *function_set.functions.GetFunctionByArguments(context, {LogicalType::LIST(LogicalType::VARCHAR)});
 }
 
+//! The reader's bind info, naming the Glue table scanned
+static BindInfo HiveScanGetBindInfo(const optional_ptr<FunctionData> bind_data_p) {
+	auto &bind_data = bind_data_p->Cast<MultiFileBindData>();
+	auto &scan_info = bind_data.multi_file_reader->Cast<HiveMultiFileReader>().ScanInfo();
+	BindInfo result(ScanType::EXTERNAL);
+	if (scan_info.reader_get_bind_info) {
+		result = scan_info.reader_get_bind_info(bind_data_p);
+	}
+	result.table = scan_info.table;
+	return result;
+}
+
 TableFunction BindHiveScan(ClientContext &context, shared_ptr<HiveScanInfo> scan_info,
                            unique_ptr<FunctionData> &bind_data) {
 	// the reader for the file format; the data columns (everything but the partition keys) are what the files hold
@@ -368,6 +369,8 @@ TableFunction BindHiveScan(ClientContext &context, shared_ptr<HiveScanInfo> scan
 	auto scan_function = GetListReadFunction(context, function_name, *scan_info);
 	// with the HiveMultiFileReader: the table's schema and partition values, not the files'
 	scan_function.get_multi_file_reader = HiveMultiFileReader::CreateInstance;
+	scan_info->reader_get_bind_info = scan_function.get_bind_info;
+	scan_function.get_bind_info = HiveScanGetBindInfo;
 
 	vector<LogicalType> return_types;
 	vector<Identifier> names;

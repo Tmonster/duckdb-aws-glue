@@ -40,6 +40,11 @@ struct HiveScanInfo : public TableFunctionInfo {
 	//! which can run concurrently with opening files.
 	mutable mutex file_partitions_lock;
 	unordered_map<string, idx_t> file_partitions;
+	//! The Glue table scanned (not set for hive_scan): the binder only offers the virtual columns (filename) of a
+	//! catalog table whose scan names it
+	optional_ptr<TableCatalogEntry> table;
+	//! The bind info of the bound reader (read_parquet, read_csv, ...), to which the scan adds the table
+	table_function_get_bind_info_t reader_get_bind_info = nullptr;
 
 	//! The index of a partition key by name, or DConstants::INVALID_INDEX
 	idx_t GetPartitionKeyIndex(const string &name) const;
@@ -53,7 +58,7 @@ struct HiveScanInfo : public TableFunctionInfo {
 //! the partition columns are applied to the partition values first (HiveMultiFileReader::ComplexFilterPushdown), so
 //! only the partitions a query reads are ever listed. When at least 'hive_partition_listing_threshold' of those
 //! partitions live below the table root, the root is listed once (recursively, one request per 1000 keys on S3) and
-//! the files are matched to their partitions by prefix; otherwise, and for partitions elsewhere, every partition is
+//! the files are matched to their partitions by directory; otherwise, and for partitions elsewhere, every partition is
 //! one listing of its location. An unpartitioned table is one listing of the root location.
 class HiveMultiFileList : public LazyMultiFileList {
 public:
@@ -131,7 +136,6 @@ public:
 	                  const vector<ColumnIndex> &global_column_ids, ClientContext &context,
 	                  optional_ptr<MultiFileReaderGlobalState> global_state) override;
 
-private:
 	const HiveScanInfo &ScanInfo() const;
 
 private:
