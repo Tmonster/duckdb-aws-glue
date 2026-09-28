@@ -41,6 +41,9 @@ GluePartitionTarget ResolveGlueTable(ClientContext &context, const string &funct
 			throw BinderException("%s only works on tables of a Glue catalog, '%s' is a table of a %s catalog",
 			                      function_name, table_name.GetValue<string>(), entry.ParentCatalog().GetCatalogType());
 		}
+		if (entry.type == CatalogType::VIEW_ENTRY) {
+			throw BinderException("%s: Glue view '%s' has no partitions", function_name, table_name.GetValue<string>());
+		}
 		auto &glue_table = entry.Cast<GlueTable>();
 		qualified = QualifiedName(entry.ParentCatalog().GetName(), Identifier(glue_table.table_info.database_name),
 		                          Identifier(glue_table.table_info.name));
@@ -60,6 +63,9 @@ GluePartitionTarget ResolveGlueTable(ClientContext &context, const string &funct
 		throw CatalogException("Table '%s.%s' does not exist in Glue catalog '%s'",
 		                       qualified.Schema().GetIdentifierName(), qualified.Name().GetIdentifierName(),
 		                       qualified.Catalog().GetIdentifierName());
+	}
+	if (result.table.IsView()) {
+		throw BinderException("%s: Glue view '%s' has no partitions", function_name, result.TableName());
 	}
 	if (result.table.GetFormat() != GlueTableFormat::HIVE) {
 		throw NotImplementedException("%s only works on Hive tables, '%s' is a %s table", function_name,
@@ -318,7 +324,7 @@ void GlueAddPartitionScan(ClientContext &context, TableFunctionInput &data, Data
 	state.done = true;
 	auto &bind_data = data.bind_data->Cast<GluePartitionChangeBindData>();
 	auto &table = bind_data.target.table;
-	GluePartitionInput partition;
+	GluePartitionInfo partition;
 	partition.values = bind_data.values;
 	partition.location = bind_data.location;
 	GlueAPI::CreatePartition(context, *bind_data.target.catalog, table.database_name, table.name, partition,
@@ -665,7 +671,7 @@ void GlueAlterTableApply(ClientContext &context, TableFunctionInput &data, GlueA
 		row.location = step.location.empty() ? Value(LogicalType::VARCHAR) : Value(step.location);
 		state.rows.push_back(std::move(row));
 	};
-	vector<GluePartitionInput> pending_adds;
+	vector<GluePartitionInfo> pending_adds;
 	auto flush_adds = [&]() {
 		if (pending_adds.empty()) {
 			return;
@@ -679,7 +685,7 @@ void GlueAlterTableApply(ClientContext &context, TableFunctionInput &data, GlueA
 		}
 		switch (step.action) {
 		case GlueAlterAction::ADD: {
-			GluePartitionInput partition;
+			GluePartitionInfo partition;
 			partition.values = step.values;
 			partition.location = step.location;
 			pending_adds.push_back(std::move(partition));

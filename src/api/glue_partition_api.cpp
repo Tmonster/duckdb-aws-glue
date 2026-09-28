@@ -89,7 +89,7 @@ bool GlueAPI::GetPartition(ClientContext &context, GlueCatalog &catalog, const s
 }
 
 bool GlueAPI::CreatePartition(ClientContext &context, GlueCatalog &catalog, const string &database_name,
-                              const string &table_name, const GluePartitionInput &partition, bool if_not_exists) {
+                              const string &table_name, const GluePartitionInfo &partition, bool if_not_exists) {
 	CheckWritable(catalog, "CreatePartition");
 	GlueHttpClientContextScope http_scope(context);
 	auto client = GetClient(context, catalog);
@@ -341,12 +341,12 @@ static string TrimLocation(string location) {
 //! Add the statistics of the given (existing) partitions to the statistics Glue has for them
 static void AddPartitionStatistics(Aws::Glue::GlueClient &client, const GlueCatalog &catalog,
                                    const string &database_name, const string &table_name,
-                                   const vector<reference<const GluePartitionInput>> &partitions) {
+                                   const vector<reference<const GluePartitionInfo>> &partitions) {
 	// BatchGetPartition accepts at most 1000 partitions per call, BatchUpdatePartition at most 100
 	constexpr idx_t GET_BATCH_SIZE = 1000;
 	constexpr idx_t UPDATE_BATCH_SIZE = 100;
 	constexpr idx_t MAX_GET_ATTEMPTS = 5;
-	unordered_map<string, reference<const GluePartitionInput>> inputs;
+	unordered_map<string, reference<const GluePartitionInfo>> inputs;
 	for (auto &partition : partitions) {
 		inputs.emplace(PartitionKey(partition.get().values), partition);
 	}
@@ -432,7 +432,7 @@ static void AddPartitionStatistics(Aws::Glue::GlueClient &client, const GlueCata
 }
 
 void GlueAPI::BatchCreatePartitions(ClientContext &context, GlueCatalog &catalog, const string &database_name,
-                                    const string &table_name, const vector<GluePartitionInput> &partitions) {
+                                    const string &table_name, const vector<GluePartitionInfo> &partitions) {
 	CheckWritable(catalog, "BatchCreatePartition");
 	if (partitions.empty()) {
 		return;
@@ -453,11 +453,11 @@ void GlueAPI::BatchCreatePartitions(ClientContext &context, GlueCatalog &catalog
 
 	// BatchCreatePartition accepts at most 100 partitions per call
 	constexpr idx_t BATCH_SIZE = 100;
-	vector<reference<const GluePartitionInput>> existing_with_statistics;
+	vector<reference<const GluePartitionInfo>> existing_with_statistics;
 	for (idx_t offset = 0; offset < partitions.size(); offset += BATCH_SIZE) {
 		auto batch_end = MinValue<idx_t>(offset + BATCH_SIZE, partitions.size());
 		Aws::Vector<Aws::Glue::Model::PartitionInput> inputs;
-		unordered_map<string, reference<const GluePartitionInput>> batch_partitions;
+		unordered_map<string, reference<const GluePartitionInfo>> batch_partitions;
 		for (idx_t i = offset; i < batch_end; i++) {
 			auto &partition = partitions[i];
 			Aws::Glue::Model::PartitionInput input;
