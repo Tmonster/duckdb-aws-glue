@@ -171,8 +171,22 @@ PhysicalOperator &GlueHiveInsert::PlanWrite(ClientContext &context, PhysicalPlan
 	string copy_format = format_name;
 	identifier_map_t<vector<Value>> copy_options;
 	switch (file_format) {
-	case HiveFileFormat::PARQUET:
+	case HiveFileFormat::PARQUET: {
+		auto codec = table_info.GetParquetCompression();
+		if (codec.empty()) {
+			break;
+		}
+		copy_options[Identifier("compression")] = {Value(codec)};
+		// DuckDB's parquet writer takes a compression_level for zstd only
+		if (codec != "zstd") {
+			break;
+		}
+		auto level = table_info.GetCompressionLevel();
+		if (!level.empty()) {
+			copy_options[Identifier("compression_level")] = {Value(level)};
+		}
 		break;
+	}
 	case HiveFileFormat::AVRO:
 		ExtensionHelper::AutoLoadExtension(context, "avro");
 		break;
@@ -240,6 +254,12 @@ PhysicalOperator &GlueHiveInsert::PlanWrite(ClientContext &context, PhysicalPlan
 		break;
 	}
 	}
+	if (IsTextFileFormat(file_format)) {
+		auto codec = table_info.GetTextCompression();
+		if (codec.IsCompressed()) {
+			copy_options[Identifier("compression")] = {Value(codec.ToString())};
+		}
+	}
 	auto copy_function = TryGetCopyFunction(*context.db, copy_format);
 	if (!copy_function) {
 		throw MissingExtensionException("Writing to Hive table '%s' requires the %s copy function", table_info.name,
@@ -253,6 +273,7 @@ PhysicalOperator &GlueHiveInsert::PlanWrite(ClientContext &context, PhysicalPlan
 
 	// Hive convention: partition columns live in the directory names, not in the files
 	CopyFunctionBindInput bind_input(*copy_info);
+	bind_input.file_extension = format_name;
 	auto names_to_write = LogicalCopyToFile::GetNamesWithoutPartitions(copy_names, partition_columns, false);
 	auto types_to_write = LogicalCopyToFile::GetTypesWithoutPartitions(copy_types, partition_columns, false);
 	auto function_data = copy_function->function.copy_to_bind(context, bind_input, names_to_write, types_to_write);
@@ -287,11 +308,12 @@ PhysicalOperator &GlueHiveInsert::PlanWrite(ClientContext &context, PhysicalPlan
 		copy.file_path = location;
 		copy.batches_per_file = NumericLimits<idx_t>::Maximum() - 1;
 		copy.partition_output = false;
+		// with rotation, false writes no file for an insert of no rows and none at the location itself
 		copy.write_empty_file = false;
 		// not per-thread output: it writes a file even for an insert of no rows
 		copy.per_thread_output = false;
 	}
-	copy.file_extension = format_name;
+	copy.file_extension = bind_input.file_extension;
 	copy.overwrite_mode = CopyOverwriteMode::COPY_OVERWRITE_OR_IGNORE;
 	copy.return_type = return_type;
 	copy.names = copy_names;
@@ -329,11 +351,19 @@ PhysicalOperator &GlueHiveInsert::PlanInsert(ClientContext &context, PhysicalPla
 
 PhysicalOperator &GlueHiveInsert::PlanCreateTableAs(ClientContext &context, PhysicalPlanGenerator &planner,
                                                     LogicalCreateTable &op, PhysicalOperator &plan) {
+	for (auto &option : op.info->Base().options) {
+		if (GlueSchemaEntry::IsBucketingOption(option.first)) {
+			throw NotImplementedException(
+			    "CREATE TABLE ... AS with option '%s' is not supported: it creates a bucketed "
+			    "Glue table, and DuckDB does not write a bucketed layout",
+			    option.first);
+		}
+	}
 	// Create the table in Glue first (Glue has no transactions, the table exists from here on even if the insert
 	// fails), then write the query result into it
 	auto &glue_catalog = op.schema.catalog.Cast<GlueCatalog>();
 	auto transaction = glue_catalog.GetCatalogTransaction(context);
-	auto entry = op.schema.CreateTable(transaction, *op.info);
+	auto entry = glue_catalog.CreateTable(transaction, op.schema, *op.info);
 
 	vector<Identifier> names;
 	vector<LogicalType> types;
@@ -476,8 +506,8 @@ SinkFinalizeType GlueHiveInsert::Finalize(Pipeline &pipeline, Event &event, Clie
 SourceResultType GlueHiveInsert::GetDataInternal(ExecutionContext &context, DataChunk &chunk,
                                                  OperatorSourceInput &input) const {
 	auto &state = sink_state->Cast<GlueHiveInsertGlobalState>();
-	chunk.SetCardinality(1);
-	chunk.SetValue(0, 0, Value::BIGINT(NumericCast<int64_t>(state.insert_count)));
+	chunk.data[0].Append(Value::BIGINT(NumericCast<int64_t>(state.insert_count)));
+	chunk.CheckCardinality(1);
 	return SourceResultType::FINISHED;
 }
 

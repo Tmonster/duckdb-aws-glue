@@ -69,6 +69,7 @@ TableFunction GlueTable::GetHiveScanFunction(ClientContext &context, unique_ptr<
 	// The scan produces the columns this entry was planned with: data columns first, partition keys last. The SerDe
 	// decides the file format (throws for unsupported SerDes).
 	auto scan_info = make_shared_ptr<HiveScanInfo>();
+	scan_info->catalog_name = catalog.GetName().GetIdentifierName();
 	scan_info->database_name = latest_info.database_name;
 	scan_info->table_name = latest_info.name;
 	scan_info->root_location = latest_info.location;
@@ -77,6 +78,9 @@ TableFunction GlueTable::GetHiveScanFunction(ClientContext &context, unique_ptr<
 	scan_info->quote = latest_info.GetQuoteCharacter();
 	scan_info->escape = latest_info.GetEscapeCharacter();
 	scan_info->header = latest_info.HasHeader();
+	if (IsTextFileFormat(scan_info->file_format)) {
+		scan_info->compression = latest_info.GetTextCompression();
+	}
 	for (auto &column : GetColumns().Logical()) {
 		scan_info->names.push_back(column.Name());
 		scan_info->types.push_back(column.Type());

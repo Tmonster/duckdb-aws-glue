@@ -28,6 +28,8 @@ public:
 public:
 	//! Look up the (s3 or aws) secret that holds the AWS credentials for this catalog
 	static unique_ptr<SecretEntry> GetStorageSecret(ClientContext &context, const string &secret_name);
+	//! Glue has no transactions: throw on DDL or INSERT inside an explicit (BEGIN) transaction
+	static void ThrowIfInExplicitTransaction(ClientContext &context);
 
 	void Initialize(bool load_builtin) override;
 	string GetCatalogType() override {
@@ -51,6 +53,9 @@ public:
 	//! Allow CREATE TABLE ... PARTITIONED BY (...) WITH (location = '...', <property> = '...'); the options are
 	//! validated in GlueSchemaEntry::CreateTable
 	ErrorData SupportsCreateTable(BoundCreateTableInfo &info) override;
+	//! Allow CREATE SCHEMA ... WITH (comment = '...', location = '...', <parameter> = '...'), applied in CreateSchema
+	ErrorData SupportsCreateSchema(CreateSchemaInfo &info) override;
+	void AlterSchema(CatalogTransaction transaction, SchemaCatalogEntry &schema, AlterSchemaInfo &info) override;
 
 	optional_ptr<CatalogEntry> CreateSchema(CatalogTransaction transaction, CreateSchemaInfo &info) override;
 	void DropSchema(ClientContext &context, DropInfo &info) override;
@@ -93,6 +98,9 @@ public:
 private:
 	//! Throw unless 'table' is a Hive table, the only kind that can be written
 	static GlueTable &GetHiveTableForDML(TableCatalogEntry &table, const char *statement);
+	//! Apply one CREATE / ALTER SCHEMA option: 'comment' is the Description, 'location' the LocationUri and any other
+	//! key a database parameter
+	static void SetDatabaseOption(GlueDatabaseInfo &database, const string &key, const Value &value);
 
 private:
 	GlueSchemaSet schemas;

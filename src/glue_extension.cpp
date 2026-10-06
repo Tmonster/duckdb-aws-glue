@@ -14,6 +14,7 @@
 #include "duckdb/main/extension_helper.hpp"
 
 #include <aws/core/Aws.h>
+#include <mutex>
 #include "catalog/glue_catalog.hpp"
 #include "catalog/glue_transaction_manager.hpp"
 
@@ -34,12 +35,12 @@ public:
 };
 
 static void InitAWSAPI() {
-	static bool loaded = false;
-	if (!loaded) {
+	// Should only be called once, and databases can load the extension concurrently
+	static std::once_flag initialized;
+	std::call_once(initialized, [] {
 		Aws::SDKOptions options;
-		Aws::InitAPI(options); // Should only be called once.
-		loaded = true;
-	}
+		Aws::InitAPI(options);
+	});
 }
 
 static void LoadInternal(ExtensionLoader &loader) {
@@ -59,6 +60,13 @@ static void LoadInternal(ExtensionLoader &loader) {
 	                          "ENDPOINT. At most 10.",
 	                          LogicalType::UBIGINT, Value::UBIGINT(0));
 
+	config.AddExtensionOption("glue_create_bucketed_tables",
+	                          "Allow CREATE TABLE ... WITH (BucketColumns = [...], NumberOfBuckets = n, SortColumns = "
+	                          "[...]) to create a bucketed (clustered) Hive table. DuckDB reads such a table but does "
+	                          "not write one: INSERT into it and CREATE TABLE ... AS with these options are refused. "
+	                          "Default false.",
+	                          LogicalType::BOOLEAN, Value::BOOLEAN(false));
+
 	config.AddExtensionOption("hive_partition_listing_threshold",
 	                          "When a scan reads at least this many partitions below the table location, the location "
 	                          "is listed once (recursively) instead of one listing per partition. Default 10.",
@@ -66,7 +74,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// The HTTP client factory has to be in place before the first AWS client is constructed
 	InitAWSAPI();
-	RegisterGlueHttpClientFactory(instance);
+	RegisterGlueHttpClientFactory();
 
 	// Hive tables are read with read_parquet
 	ExtensionHelper::AutoLoadExtension(instance, "parquet");
@@ -77,6 +85,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	StorageExtension::Register(config, "glue", make_shared_ptr<GlueStorageExtension>());
 
 	loader.RegisterFunction(GetGlueGetTableResponseFunction());
+	loader.RegisterFunction(GetGlueGetDatabaseResponseFunction());
 	loader.RegisterFunction(GetGluePartitionsFunction());
 	loader.RegisterFunction(GetGlueAddPartitionFunction());
 	loader.RegisterFunction(GetGlueDropPartitionFunction());
