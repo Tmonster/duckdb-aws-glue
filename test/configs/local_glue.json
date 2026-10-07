@@ -7,6 +7,7 @@
     "json",
     "avro",
     "httpfs",
+    "iceberg",
     "glue"
   ],
   "test_env": [
@@ -33,6 +34,25 @@
       "paths": [
         "test/sql/hive/ddl/alter_partition/glue_repair_table.test",
         "test/sql/hive/ddl/alter_partition/test_show_partitions.test"
+      ]
+    },
+    {
+      "reason": "moto does not serve Glue's Iceberg REST endpoints (/iceberg/v1/...), which Iceberg tables are read and written through",
+      "paths": [
+        "test/sql/iceberg/create_table.test",
+        "test/sql/iceberg/create_table_as.test",
+        "test/sql/iceberg/dml.test",
+        "test/sql/iceberg/alter_table.test",
+        "test/sql/iceberg/drop_table.test",
+        "test/sql/iceberg/hidden_catalog.test",
+        "test/sql/iceberg/time_travel.test",
+        "test/sql/iceberg/types.test",
+        "test/sql/iceberg/hive_only_functions.test",
+        "test/sql/combined_table_types/join_hive_iceberg.test",
+        "test/sql/combined_table_types/copy_between_table_types.test",
+        "test/sql/combined_table_types/listing.test",
+        "test/sql/combined_table_types/transactions.test",
+        "test/sql/combined_table_types/views.test"
       ]
     }
   ]
