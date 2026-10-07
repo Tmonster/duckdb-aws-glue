@@ -20,6 +20,7 @@
 #include "core/glue_types.hpp"
 #include "duckdb/common/error_data.hpp"
 #include "duckdb/parser/parsed_data/create_view_info.hpp"
+#include "duckdb/parser/parser.hpp"
 #include "catalog/glue_view.hpp"
 #include "api/glue_api.hpp"
 #include "catalog/glue_catalog.hpp"
@@ -455,7 +456,8 @@ optional_ptr<CatalogEntry> GlueSchemaEntry::CreateView(CatalogTransaction transa
 	view.sql = GlueView::RenderViewSql(info);
 	try {
 		// what is stored must read back: never write a view DuckDB itself could not parse
-		CreateViewInfo::ParseSelect(view.sql);
+		auto parser = Parser::GetBuiltinParser();
+		CreateViewInfo::ParseSelect(parser, view.sql);
 	} catch (std::exception &ex) {
 		ErrorData error(ex);
 		throw InternalException("The SQL rendered for Glue view \"%s\" does not parse: %s\n%s", view_name,
@@ -513,10 +515,7 @@ optional_ptr<CatalogEntry> GlueSchemaEntry::CreateType(CatalogTransaction transa
 	throw BinderException("Glue databases do not support creating types");
 }
 
-namespace {
-
-//! Type changes Hive can read back from the existing parquet files: widening only
-bool IsAllowedHiveTypeChange(const LogicalType &from, const LogicalType &to) {
+bool GlueSchemaEntry::IsAllowedHiveTypeChange(const LogicalType &from, const LogicalType &to) {
 	if (from == to) {
 		return true;
 	}
@@ -546,8 +545,6 @@ bool IsAllowedHiveTypeChange(const LogicalType &from, const LogicalType &to) {
 	}
 	return false;
 }
-
-} // namespace
 
 //! The parameters GlueTableInfo::GetFormat() derives the table format from can not be set or reset: changing
 //! table_type on a Hive table would relabel it as Iceberg or Delta without a metadata file behind it.
@@ -583,13 +580,7 @@ void GlueSchemaEntry::AlterTableProperties(ClientContext &context, AlterTableInf
 		}
 	}
 	GlueAPI::UpdateTableParameters(context, glue_catalog, database_info.name, table_name, set, unset);
-
-	GlueTableInfo updated;
-	if (!GlueAPI::GetTable(context, glue_catalog, database_info.name, table_name, updated)) {
-		throw CatalogException("Table \"%s.%s\" was altered but could not be fetched afterwards", database_info.name,
-		                       table_name);
-	}
-	tables.CreateEntry(tables.CreateEntry(updated));
+	RefreshTable(context, table_name);
 }
 
 //! The ALTER statement an AlterInfo comes from, for the errors of the ones Glue tables do not support
@@ -762,7 +753,10 @@ void GlueSchemaEntry::Alter(CatalogTransaction transaction, AlterInfo &info) {
 	}
 	case AlterTableType::ALTER_COLUMN_TYPE: {
 		auto &change = alter_table.Cast<ChangeColumnTypeInfo>();
-		auto &name = change.column_name.GetIdentifierName();
+		if (change.column_path.size() > 1) {
+			throw NotImplementedException("Changing the type of a nested field is not yet supported");
+		}
+		auto &name = change.column_path[0].GetIdentifierName();
 		if (is_partition_key(name)) {
 			throw CatalogException("Column \"%s\" is a partition key of table \"%s\" and its type can not be "
 			                       "changed",
@@ -788,14 +782,16 @@ void GlueSchemaEntry::Alter(CatalogTransaction transaction, AlterInfo &info) {
 	}
 
 	GlueAPI::UpdateTableColumns(context, glue_catalog, database_info.name, table_name, columns);
+	RefreshTable(context, table_name);
+}
 
-	// refresh the cached entry from what Glue stored
+GlueTable &GlueSchemaEntry::RefreshTable(ClientContext &context, const string &table_name) {
 	GlueTableInfo updated;
-	if (!GlueAPI::GetTable(context, glue_catalog, database_info.name, table_name, updated)) {
+	if (!GlueAPI::GetTable(context, catalog.Cast<GlueCatalog>(), database_info.name, table_name, updated)) {
 		throw CatalogException("Table \"%s.%s\" was altered but could not be fetched afterwards", database_info.name,
 		                       table_name);
 	}
-	tables.CreateEntry(tables.CreateEntry(updated));
+	return tables.CreateEntry(tables.CreateEntry(updated))->Cast<GlueTable>();
 }
 
 void GlueSchemaEntry::DropEntry(ClientContext &context, DropInfo &info) {

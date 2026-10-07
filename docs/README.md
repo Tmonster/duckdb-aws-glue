@@ -39,14 +39,25 @@ Every format is scanned through a custom `MultiFileReader` (`HiveMultiFileReader
   a file belongs to the deepest one. A table without data files (just created) scans as empty.
 - Partition column values are the values Glue stores for the partition, not the directory names, typed as Glue's
   partition keys. Files are listed lazily: filters on partition columns are applied to the partition values first,
-  so only the partitions a query reads are listed (EXPLAIN shows the partitions kept as `Scanning Files`), and
-  planning a query does not touch S3. When a query reads at least `hive_partition_listing_threshold` (default
-  10) partitions below the table location, the location is listed once, recursively (one S3 request per 1000
-  keys), and the files are matched to their partitions by prefix; fewer partitions, and partitions at custom
-  locations, are listed one directory each.
-- The schema is Glue's, data columns first and partition keys last, in `PARTITIONED BY` order. A column a file
-  does not have (added after the file was written) reads as NULL, a column with a different type in the file is
-  cast, and file columns Glue does not list are ignored.
+  so only the partitions a query reads are listed (EXPLAIN shows the partitions kept as `Scanning Files`). When a
+  query reads at least `hive_partition_listing_threshold` (default 10) partitions below the table location, the
+  location is listed once, recursively (one S3 request per 1000 keys), and the files are matched to their
+  partitions by prefix; fewer partitions, and partitions at custom locations, are listed one directory each.
+- To estimate a scan's row count, planning lists one directory per table and query (the first partition a scan
+  of the table reads, or the location of an unpartitioned table; when the scan lists the table location, the
+  first page of that listing, which the scan then continues) and reads the row count of its largest file: the
+  parquet footer, or the lines of a 64 KiB prefix for csv and json. Every scan of the table in the query scales
+  that one measurement by the partitions it reads, and a scan that lists the same directory reuses the listing.
+  Avro tables are not measured, so planning them lists nothing.
+- The schema is Glue's, data columns first and partition keys last, in `PARTITIONED BY` order. Files are matched
+  by column name: a column a file does not have (added after the file was written) reads as NULL, a column with
+  a different type in the file is cast, and file columns Glue does not list are ignored.
+
+The SerDe of the Glue table decides the reader: ParquetHiveSerDe reads with `read_parquet`, LazySimpleSerDe and
+OpenCSVSerde with `read_csv` (columns by position, no header unless `skip.header.line.count` is 1, delimiter
+from `field.delim` / `separatorChar`, `,` otherwise) and JsonSerDe with `read_json` (one object per line, keys by
+name) and AvroSerDe with `read_avro` from the avro extension, which is loaded on demand. Other SerDes (ORC, Ion,
+...) are not supported.
 
 Compression: a csv or json table is read with the codec it records (`write.compression`, else the `compressionType`
 Glue crawlers set), whatever the names of its files; DuckDB reads gzip and zstd, another codec is an error. A table
@@ -96,6 +107,16 @@ avro files carry their codec themselves.
   parameter and the rest of the definition stay as they are. Values are stored as strings (`compression_level = 4`
   becomes `'4'`); a key may be quoted (`'parquet.compression' = 'ZSTD'`). The parameters the table format is read
   from (`table_type`, `spark.sql.sources.provider`, `metadata_location`) can not be changed this way.
+- `CALL glue_replace_columns('cat.db.t', {id: 'BIGINT', name: 'VARCHAR'}, comments := {id: '...'})` is Hive's
+  `ALTER TABLE ... REPLACE COLUMNS`: it replaces all data columns of the table at once, which can also rename and
+  reorder them. Types are DuckDB types, stored the way `CREATE TABLE` stores them; a column that stays (same name,
+  compared case-insensitively) keeps its stored name and may only be widened, as with `ALTER COLUMN ... TYPE`. As in
+  Hive, comments not given in `comments` are dropped; `keep_comments := true` keeps those of the columns that stay
+  (a NULL in `comments` then removes one). The partition keys are kept
+  and must not be listed; the bucketing and sort columns must be listed. It returns the columns as stored in Glue
+  (Glue type names). The data files are not rewritten: parquet, json and avro files are matched by name (a renamed
+  column reads as NULL), csv files by position, so a csv table keeps its number of columns, each may only be widened
+  and giving it a new name renames it.
 - `DROP TABLE` and `DROP SCHEMA` delete the Glue entries but leave the data files in S3. Glue deletes all tables of
   a database when the database is dropped, so `DROP SCHEMA` refuses a database that still has tables or views unless
   `CASCADE` is given.
@@ -299,7 +320,8 @@ Both loads create their Glue tables with `CREATE TABLE IF NOT EXISTS ... AS`, so
 factor) has no effect while the tables are in Glue: rebuild the fixture with
 `make glue-fixture-down && make glue-fixture` first.
 
-`.github/workflows/Regression.yml` runs them for a PR and for its merge base and compares the timings.
+`.github/workflows/Regression.yml` runs `benchmark/*.benchmark`, `benchmark/pushdown/`, `benchmark/optimizer/` and
+`benchmark/tpch/sf1/` for a PR and for its merge base and compares the timings. It does not run `benchmark/tpcds/`.
 
 ## Building
 

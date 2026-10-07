@@ -14,6 +14,7 @@
 #include "duckdb/main/extension_helper.hpp"
 
 #include <aws/core/Aws.h>
+#include <mutex>
 #include "catalog/glue_catalog.hpp"
 #include "planning/glue_optimizer_extension.hpp"
 #include "catalog/glue_transaction_manager.hpp"
@@ -35,12 +36,12 @@ public:
 };
 
 static void InitAWSAPI() {
-	static bool loaded = false;
-	if (!loaded) {
+	// Should only be called once, and databases can load the extension concurrently
+	static std::once_flag initialized;
+	std::call_once(initialized, [] {
 		Aws::SDKOptions options;
-		Aws::InitAPI(options); // Should only be called once.
-		loaded = true;
-	}
+		Aws::InitAPI(options);
+	});
 }
 
 static void LoadInternal(ExtensionLoader &loader) {
@@ -76,7 +77,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 
 	// The HTTP client factory has to be in place before the first AWS client is constructed
 	InitAWSAPI();
-	RegisterGlueHttpClientFactory(instance);
+	RegisterGlueHttpClientFactory();
 
 	// Hive tables are read with read_parquet
 	ExtensionHelper::AutoLoadExtension(instance, "parquet");
@@ -94,6 +95,7 @@ static void LoadInternal(ExtensionLoader &loader) {
 	loader.RegisterFunction(GetGlueRenamePartitionFunction());
 	loader.RegisterFunction(GetGlueSetPartitionLocationFunction());
 	loader.RegisterFunction(GetGlueSetTableLocationFunction());
+	loader.RegisterFunction(GetGlueReplaceColumnsFunction());
 	loader.RegisterFunction(GetGlueAlterTableFunction());
 	// ALTER TABLE ... ADD / DROP PARTITION etc., switched on with SET active_grammar_extensions = ['glue_hive_ddl']
 	RegisterGlueGrammarExtension(instance);
