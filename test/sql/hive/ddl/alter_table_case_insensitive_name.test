@@ -1,0 +1,79 @@
+# name: test/sql/hive/ddl/alter_table_case_insensitive_name.test
+# description: ALTER TABLE and DROP TABLE find a Glue table named in another case
+# group: [ddl]
+
+require httpfs
+
+require glue
+
+require-env GLUE_CATALOG_ID
+
+statement ok
+attach '{GLUE_CATALOG_ID}' as my_datalake (
+    TYPE glue,
+    ENDPOINT '{GLUE_ENDPOINT}',
+    DEFAULT_LOCATION '{DEFAULT_S3_LOCATION}/{TEST_DIR}'
+);
+
+statement ok
+DROP TABLE IF EXISTS my_datalake.default.altcase_tbl;
+
+statement ok
+CREATE TABLE my_datalake.default.altcase_tbl (mycolumn INTEGER, myothercolumn INTEGER, price FLOAT);
+
+statement ok
+ALTER TABLE my_datalake.default."ALTCASE_TBL" DROP COLUMN "MYCOLUMN";
+
+statement ok
+ALTER TABLE my_datalake.default."AltCase_Tbl" ADD COLUMN extra VARCHAR;
+
+# RENAME COLUMN is not supported, but the table is found
+statement error
+ALTER TABLE my_datalake.default.ALTCASE_TBL RENAME COLUMN extra TO renamed;
+----
+<REGEX>:Not implemented Error: ALTER TABLE RENAME_COLUMN is not supported for Glue tables.*
+
+statement ok
+ALTER TABLE my_datalake.default."ALTCASE_TBL" ALTER COLUMN price TYPE DOUBLE;
+
+statement ok
+ALTER TABLE my_datalake.default."ALTCASE_TBL" SET (altcase_owner = 'analytics');
+
+query II
+SELECT column_name, data_type FROM duckdb_columns() WHERE database_name = 'my_datalake' AND table_name = 'altcase_tbl' ORDER BY column_index;
+----
+myothercolumn	INTEGER
+price	DOUBLE
+extra	VARCHAR
+
+query I
+SELECT parameters['altcase_owner'] FROM glue_get_table_response('my_datalake.default.altcase_tbl');
+----
+analytics
+
+statement ok
+ALTER TABLE my_datalake.default."ALTCASE_TBL" RESET (altcase_owner);
+
+query I
+SELECT parameters['altcase_owner'] IS NULL FROM glue_get_table_response('my_datalake.default.altcase_tbl');
+----
+true
+
+# errors still name the table
+statement error
+ALTER TABLE my_datalake.default."ALTCASE_TBL" DROP COLUMN "MISSING";
+----
+<REGEX>:Catalog Error: Table "altcase_tbl" does not have a column with name "MISSING".*
+
+statement error
+ALTER TABLE my_datalake.default."ALTCASE_MISSING" DROP COLUMN mycolumn;
+----
+<REGEX>:Catalog Error: Table with name ALTCASE_MISSING does not exist.*
+
+statement ok
+DROP TABLE my_datalake.default."ALTCASE_TBL";
+
+statement error
+SELECT * FROM my_datalake.default.altcase_tbl;
+----
+<REGEX>:Catalog Error: Table with name altcase_tbl does not exist.*

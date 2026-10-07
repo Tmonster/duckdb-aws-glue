@@ -560,9 +560,9 @@ static void CheckTablePropertyChangeable(const string &key) {
 }
 
 //! ALTER TABLE t SET (key = value, ...) / RESET (key, ...): Hive's SET / UNSET TBLPROPERTIES
-void GlueSchemaEntry::AlterTableProperties(ClientContext &context, AlterTableInfo &alter_table) {
+void GlueSchemaEntry::AlterTableProperties(ClientContext &context, const string &table_name,
+                                           AlterTableInfo &alter_table) {
 	auto &glue_catalog = catalog.Cast<GlueCatalog>();
-	auto table_name = alter_table.GetQualifiedName().Name().GetIdentifierName();
 	vector<pair<string, string>> set;
 	vector<string> unset;
 	if (alter_table.alter_table_type == AlterTableType::SET_TABLE_OPTIONS) {
@@ -606,6 +606,7 @@ void GlueSchemaEntry::Alter(CatalogTransaction transaction, AlterInfo &info) {
 		}
 		throw BinderException("\"%s\" is a view", table_name);
 	}
+	table_name = entry->name.GetIdentifierName();
 	auto &glue_table = entry->Cast<GlueTable>();
 	if (glue_table.table_info.GetFormat() != GlueTableFormat::HIVE) {
 		throw NotImplementedException("ALTER TABLE is only supported for Hive tables in a Glue catalog, '%s' is a %s "
@@ -618,7 +619,7 @@ void GlueSchemaEntry::Alter(CatalogTransaction transaction, AlterInfo &info) {
 	auto &alter_table = info.Cast<AlterTableInfo>();
 	if (alter_table.alter_table_type == AlterTableType::SET_TABLE_OPTIONS ||
 	    alter_table.alter_table_type == AlterTableType::RESET_TABLE_OPTIONS) {
-		AlterTableProperties(context, alter_table);
+		AlterTableProperties(context, table_name, alter_table);
 		return;
 	}
 
@@ -756,6 +757,7 @@ void GlueSchemaEntry::DropEntry(ClientContext &context, DropInfo &info) {
 		                       info.type == CatalogType::VIEW_ENTRY ? "View" : "Table", table_name, database_info.name);
 	}
 	CheckEntryType(existing, info.type, table_name, "drop");
+	table_name = existing->name.GetIdentifierName();
 	if (existing->type == CatalogType::VIEW_ENTRY && !existing->Cast<GlueView>().IsDuckDBView()) {
 		throw CatalogException("Glue view \"%s\" was not written by DuckDB; drop it from the engine that wrote it",
 		                       table_name);
