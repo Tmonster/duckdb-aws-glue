@@ -29,6 +29,10 @@ public:
 	GlueTableInfo RefreshTableInfo(ClientContext &context) const;
 	//! "a Hive table ("t" in Glue database "db")", for the errors of statements Glue tables do not support
 	string DescribeForError() const;
+	optional_ptr<CatalogEntry> CreateTrigger(CatalogTransaction transaction, CreateTriggerInfo &info) override;
+	//! Refuses the UPDATE while it is bound: a Hive table has no row ids to update by
+	void BindUpdateConstraints(Binder &binder, LogicalGet &get, LogicalProjection &proj, LogicalUpdate &update,
+	                           ClientContext &context) override;
 
 private:
 	//! Scan a Hive table with read_parquet over the files of the partitions Glue lists (or the table location for an

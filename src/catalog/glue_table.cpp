@@ -1,6 +1,4 @@
 #include "catalog/glue_table.hpp"
-#include "catalog/glue_client_state.hpp"
-
 #include "duckdb/catalog/catalog_entry/schema_catalog_entry.hpp"
 #include "duckdb/common/exception.hpp"
 #include "duckdb/storage/statistics/base_statistics.hpp"
@@ -85,8 +83,17 @@ string GlueTable::DescribeForError() const {
 	                          schema.name.GetIdentifierName());
 }
 
+optional_ptr<CatalogEntry> GlueTable::CreateTrigger(CatalogTransaction transaction, CreateTriggerInfo &info) {
+	throw NotImplementedException("CREATE TRIGGER is not supported for tables in a Glue catalog, the trigger is on %s",
+	                              DescribeForError());
+}
+
+void GlueTable::BindUpdateConstraints(Binder &binder, LogicalGet &get, LogicalProjection &proj, LogicalUpdate &update,
+                                      ClientContext &context) {
+	throw NotImplementedException("Cannot UPDATE %s", DescribeForError());
+}
+
 TableFunction GlueTable::GetScanFunction(ClientContext &context, unique_ptr<FunctionData> &bind_data) {
-	GlueClientState::Get(context).AddBoundTable(*this);
 	// Ask Glue what kind of table this is right before scanning: only Hive (Glue native) tables can be read
 	auto latest_info = RefreshTableInfo(context);
 	switch (latest_info.GetFormat()) {

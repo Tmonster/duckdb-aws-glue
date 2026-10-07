@@ -174,7 +174,7 @@
       ]
     },
     {
-      "reason": "BUG: debug_verify_serializer: the Glue scan serializes under the name read_parquet, deserializing it resolves the real read_parquet and fails",
+      "reason": "BUG: plan serialization (debug_verify_serializer, SQL export): the Glue scan serializes under the name read_parquet, deserializing it resolves the real read_parquet and fails",
       "paths": [
         "test/sql/aggregate/aggregates/test_reservoir_quantile_decimal.test",
         "test/sql/copy/parquet/parquet_encryption.test",
@@ -182,6 +182,7 @@
         "test/sql/sql_export/call_values.test",
         "test/sql/sql_export/ci_reconstruction.test",
         "test/sql/sql_export/expression_results.test",
+        "test/sql/sql_export/recursive_payload_results.test",
         "test/sql/tpcds/tpcds_sf0.test"
       ]
     },
@@ -317,12 +318,15 @@
         "test/sql/insert/insert_by_name.test",
         "test/sql/json/scalar/json_nested_casts.test",
         "test/sql/json/test_json_macros.test",
+        "test/sql/parser/test_columns_lists.test",
         "test/sql/parser/test_columns_prepared.test",
+        "test/sql/setops/test_union_all_by_name.test",
         "test/sql/storage/compression/alp/alp_list_skip.test",
         "test/sql/storage/compression/zstd/fetch_row.test",
         "test/sql/storage/optimistic_write/optimistic_write_large_strings.test",
         "test/sql/subquery/scalar/test_scalar_subquery.test",
         "test/sql/subquery/scalar/test_scalar_subquery_cte.test",
+        "test/sql/types/blob/test_blob_function.test",
         "test/sql/types/list/list_of_struct.test",
         "test/sql/types/list/unnest_null_empty.test",
         "test/sql/types/nested/list/test_list_slice_negative_step.test",
@@ -365,12 +369,6 @@
         "test/sql/catalog/test_catalog_errors.test",
         "test/sql/catalog/test_if_not_exists.test",
         "test/sql/catalog/view/test_view_schema_change_with_dependencies.test"
-      ]
-    },
-    {
-      "reason": "UPDATE/DELETE inside a CTE keeps DuckDB's generic 'Can only update base table' error: only top-level statements are recognized",
-      "paths": [
-        "test/sql/progress/test_verify_progress.test"
       ]
     },
     {
@@ -486,7 +484,9 @@
         "test/sql/storage/compression/roaring/roaring_bool_analyze_array.test",
         "test/sql/storage/compression/roaring/roaring_bool_analyze_bitset.test",
         "test/sql/storage/compression/roaring/roaring_bool_analyze_run.test",
+        "test/sql/subquery/lateral/lateral_domain_filter.test",
         "test/sql/subquery/lateral/lateral_domain_filter_shapes.test",
+        "test/sql/subquery/lateral/lateral_recursive_filter_pushdown.test",
         "test/sql/window/test_streaming_window.test"
       ]
     },

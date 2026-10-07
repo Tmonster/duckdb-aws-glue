@@ -3,7 +3,6 @@ add_library_unity(
   OBJECT
   glue_attach.cpp
   glue_catalog.cpp
-  glue_client_state.cpp
   glue_schema_entry.cpp
   glue_schema_set.cpp
   glue_table.cpp

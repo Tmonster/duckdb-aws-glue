@@ -19,10 +19,16 @@ statement ok
 DROP TABLE IF EXISTS my_datalake.default.unsupported_t;
 
 statement ok
+DROP TABLE IF EXISTS my_datalake.default.unsupported_log;
+
+statement ok
 DROP VIEW IF EXISTS my_datalake.default.unsupported_v;
 
 statement ok
 CREATE TABLE my_datalake.default.unsupported_t AS SELECT 1 AS i, {'a': 1} AS s;
+
+statement ok
+CREATE TABLE my_datalake.default.unsupported_log (i INTEGER);
 
 statement ok
 CREATE VIEW my_datalake.default.unsupported_v AS SELECT 1 AS one;
@@ -34,6 +40,11 @@ Cannot UPDATE a Hive table ("unsupported_t" in Glue database "default")
 
 statement error
 PREPARE unsupported_update AS UPDATE my_datalake.default.unsupported_t SET i = ?;
+----
+Cannot UPDATE a Hive table ("unsupported_t" in Glue database "default")
+
+statement error
+WITH u AS (UPDATE my_datalake.default.unsupported_t SET i = i + 1 RETURNING i) SELECT count(*) FROM u;
 ----
 Cannot UPDATE a Hive table ("unsupported_t" in Glue database "default")
 
@@ -52,6 +63,18 @@ MERGE INTO my_datalake.default.unsupported_t USING (SELECT 1 AS i) src ON (src.i
 ----
 Cannot MERGE INTO a Hive table ("unsupported_t" in Glue database "default")
 
+# an UPDATE action of MERGE INTO is refused the way UPDATE is
+statement error
+MERGE INTO my_datalake.default.unsupported_t USING (SELECT 1 AS i) src ON (src.i = unsupported_t.i) WHEN MATCHED THEN UPDATE SET i = 2;
+----
+Cannot UPDATE a Hive table ("unsupported_t" in Glue database "default")
+
+# refused while binding, before the optimizers see an UPDATE of a table without row ids
+statement error
+UPDATE my_datalake.default.unsupported_t SET s = src.s FROM (SELECT a.i, max(b.s) AS s FROM my_datalake.default.unsupported_t a JOIN (SELECT DISTINCT i, s FROM my_datalake.default.unsupported_t) b ON (a.i = b.i) GROUP BY a.i) src WHERE unsupported_t.i = src.i;
+----
+Cannot UPDATE a Hive table ("unsupported_t" in Glue database "default")
+
 statement error
 ANALYZE my_datalake.default.unsupported_t;
 ----
@@ -68,7 +91,7 @@ CREATE INDEX unsupported_idx ON my_datalake.default.unsupported_t (i);
 Cannot CREATE INDEX on a Hive table ("unsupported_t" in Glue database "default")
 
 statement error
-CREATE TRIGGER unsupported_trg AFTER INSERT ON my_datalake.default.unsupported_t INSERT INTO my_datalake.default.unsupported_t VALUES (2, NULL);
+CREATE TRIGGER unsupported_trg AFTER INSERT ON my_datalake.default.unsupported_t INSERT INTO my_datalake.default.unsupported_log VALUES (1);
 ----
 CREATE TRIGGER is not supported for tables in a Glue catalog, the trigger is on a Hive table ("unsupported_t" in Glue database "default")
 
@@ -115,6 +138,9 @@ SELECT i, s FROM my_datalake.default.unsupported_t;
 
 statement ok
 DROP VIEW my_datalake.default.unsupported_v;
+
+statement ok
+DROP TABLE my_datalake.default.unsupported_log;
 
 statement ok
 DROP TABLE my_datalake.default.unsupported_t;
