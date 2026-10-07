@@ -23,6 +23,7 @@ vector<GlueColumn> ToColumns(const Aws::Vector<Aws::Glue::Model::Column> &input)
 		glue_column.name = ToStdString(column.GetName());
 		glue_column.type = ToStdString(column.GetType());
 		glue_column.comment = ToStdString(column.GetComment());
+		glue_column.parameters = ToStdMap(column.GetParameters());
 		result.push_back(std::move(glue_column));
 	}
 	return result;
@@ -108,6 +109,9 @@ Aws::Vector<Aws::Glue::Model::Column> ToAwsColumns(const vector<GlueColumn> &inp
 		aws_column.SetType(column.type);
 		if (!column.comment.empty()) {
 			aws_column.SetComment(column.comment);
+		}
+		if (!column.parameters.empty()) {
+			aws_column.SetParameters(ToAwsMap(column.parameters));
 		}
 		result.push_back(std::move(aws_column));
 	}

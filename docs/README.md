@@ -87,6 +87,8 @@ their codec themselves.
   table, Hive's `CLUSTERED BY (...) SORTED BY (...) INTO n BUCKETS`: bucket and sort columns are columns of the table
   that are not partition keys, and `BucketColumns` needs a positive `NumberOfBuckets`. The setting is off by default
   because DuckDB does not write to such a table (see below).
+  A `JSON` column (also nested, e.g. `JSON[]`) is a Glue `string`; its DuckDB type is kept in the column parameter
+  `duckdb.type` (e.g. `array<json>`), which is ignored once another engine changes the column's Glue type.
 - `INSERT INTO` and `CREATE TABLE ... AS` write files in the table's format into the table location (one file per partition
   touched, partition columns are not stored in the files) and register new partition directories in Glue with
   BatchCreatePartition. New partitions get `<key>=<value>` directories; rows of an existing partition are written to

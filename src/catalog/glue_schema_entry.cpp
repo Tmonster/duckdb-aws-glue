@@ -392,14 +392,14 @@ optional_ptr<CatalogEntry> GlueSchemaEntry::CreateTable(CatalogTransaction trans
 		}
 		GlueColumn glue_column;
 		glue_column.name = column.Name().GetIdentifierName();
-		glue_column.type = GlueTypes::FromLogicalType(column.Type());
+		GlueTypes::SetColumnType(glue_column, column.Type());
 		table.columns.push_back(std::move(glue_column));
 	}
 	for (auto &partition_column : partition_columns) {
 		auto &column = base.columns.GetColumn(Identifier(partition_column));
 		GlueColumn glue_column;
 		glue_column.name = column.Name().GetIdentifierName();
-		glue_column.type = GlueTypes::FromLogicalType(column.Type());
+		GlueTypes::SetColumnType(glue_column, column.Type());
 		table.partition_keys.push_back(std::move(glue_column));
 	}
 	if (table.columns.empty()) {
@@ -469,7 +469,7 @@ optional_ptr<CatalogEntry> GlueSchemaEntry::CreateView(CatalogTransaction transa
 		GlueColumn column;
 		auto aliased = i < info.aliases.size() && !info.aliases[i].GetIdentifierName().empty();
 		column.name = (aliased ? info.aliases[i] : info.names[i]).GetIdentifierName();
-		column.type = GlueTypes::FromLogicalType(info.types[i]);
+		GlueTypes::SetColumnType(column, info.types[i]);
 		view.columns.push_back(std::move(column));
 	}
 	if (existing) {
@@ -656,7 +656,7 @@ void GlueSchemaEntry::Alter(CatalogTransaction transaction, AlterInfo &info) {
 		}
 		GlueColumn column;
 		column.name = name;
-		column.type = GlueTypes::FromLogicalType(add.new_column.Type());
+		GlueTypes::SetColumnType(column, add.new_column.Type());
 		columns.push_back(std::move(column));
 		break;
 	}
@@ -710,14 +710,14 @@ void GlueSchemaEntry::Alter(CatalogTransaction transaction, AlterInfo &info) {
 		if (!column) {
 			throw CatalogException("Table \"%s\" does not have a column with name \"%s\"", table_name, name);
 		}
-		auto from = GlueTypes::ToLogicalType(column->type);
+		auto from = GlueTypes::ToLogicalType(*column);
 		if (!IsAllowedHiveTypeChange(from, change.target_type)) {
 			throw CatalogException("Can not change column \"%s\" of table \"%s\" from %s to %s: existing parquet "
 			                       "files keep their types, only widening changes (e.g. INTEGER to BIGINT, FLOAT to "
 			                       "DOUBLE, anything to VARCHAR) are supported for Hive tables",
 			                       name, table_name, from.ToString(), change.target_type.ToString());
 		}
-		column->type = GlueTypes::FromLogicalType(change.target_type);
+		GlueTypes::SetColumnType(*column, change.target_type);
 		break;
 	}
 	default:

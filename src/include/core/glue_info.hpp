@@ -19,6 +19,7 @@ struct GlueColumn {
 	//! The Glue (Hive style) type string, e.g. 'int', 'decimal(10,2)', 'array<string>'
 	string type;
 	string comment;
+	unordered_map<string, string> parameters;
 	//! Only set for entries of GlueTableInfo::sort_columns
 	GlueSortOrder sort_order = GlueSortOrder::UNSORTED;
 

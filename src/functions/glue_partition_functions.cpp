@@ -100,7 +100,7 @@ vector<string> ParsePartitionSpec(const string &function_name, const GluePartiti
 			continue;
 		}
 		// store the value the way the partition key type would render it
-		auto key_type = GlueTypes::ToLogicalType(keys[key_index].type);
+		auto key_type = GlueTypes::ToLogicalType(keys[key_index]);
 		result[key_index] = value.DefaultCastAs(key_type).ToString();
 	}
 	for (idx_t k = 0; k < keys.size(); k++) {
@@ -144,7 +144,7 @@ vector<string> ParsePartitionPairs(const string &function_name, const GluePartit
 			result[key_index] = HivePartitioning::DEFAULT_PARTITION_NAME;
 			continue;
 		}
-		auto key_type = GlueTypes::ToLogicalType(keys[key_index].type);
+		auto key_type = GlueTypes::ToLogicalType(keys[key_index]);
 		result[key_index] = Value(*pair.second).DefaultCastAs(key_type).ToString();
 	}
 	for (idx_t k = 0; k < keys.size(); k++) {
@@ -225,7 +225,7 @@ unique_ptr<FunctionData> GluePartitionsBind(ClientContext &context, TableFunctio
 	result->target = ResolveGlueTable(context, "glue_partitions", input.inputs[0]);
 	auto &table = result->target.table;
 	for (auto &key : table.partition_keys) {
-		auto type = GlueTypes::ToLogicalType(key.type);
+		auto type = GlueTypes::ToLogicalType(key);
 		result->key_types.push_back(type);
 		names.emplace_back(key.name);
 		return_types.push_back(type);
@@ -517,10 +517,9 @@ unique_ptr<FunctionData> GlueReplaceColumnsBind(ClientContext &context, TableFun
 		if (column_types[i].IsNull()) {
 			throw BinderException("glue_replace_columns: no type given for column '%s'", column.name);
 		}
-		column.type =
-		    GlueTypes::FromLogicalType(TransformStringToLogicalType(column_types[i].GetValue<string>(), context));
+		GlueTypes::SetColumnType(column, TransformStringToLogicalType(column_types[i].GetValue<string>(), context));
 		// the type as it reads back from Glue; a type that can not be read back fails here, before Glue is changed
-		auto type = GlueTypes::ToLogicalType(column.type);
+		auto type = GlueTypes::ToLogicalType(column);
 		// a column that stays must keep a type its existing files can be read with, as for ALTER COLUMN TYPE
 		optional_ptr<const GlueColumn> previous;
 		if (by_position) {
@@ -539,7 +538,7 @@ unique_ptr<FunctionData> GlueReplaceColumnsBind(ClientContext &context, TableFun
 			if (keep_comments) {
 				column.comment = previous->comment;
 			}
-			auto from = GlueTypes::ToLogicalType(previous->type);
+			auto from = GlueTypes::ToLogicalType(*previous);
 			if (!GlueSchemaEntry::IsAllowedHiveTypeChange(from, type)) {
 				throw BinderException("glue_replace_columns: can not change column '%s' of table '%s' from %s to %s: "
 				                      "existing files keep their types, only widening changes are supported",

@@ -182,6 +182,9 @@ private:
 		if (name == "string") {
 			return LogicalType::VARCHAR;
 		}
+		if (name == "json") {
+			return LogicalType::JSON();
+		}
 		if (name == "binary") {
 			return LogicalType::BLOB;
 		}
@@ -211,14 +214,13 @@ private:
 	idx_t pos;
 };
 
-} // namespace
+const char *const DUCKDB_TYPE_PARAMETER = "duckdb.type";
 
-LogicalType GlueTypes::ToLogicalType(const string &glue_type) {
-	GlueTypeParser parser(glue_type);
-	return parser.Parse();
-}
-
-string GlueTypes::FromLogicalType(const LogicalType &type) {
+//! keep_json renders JSON as 'json' instead of 'string', which only DuckDB reads back
+string ToGlueType(const LogicalType &type, bool keep_json) {
+	if (type.IsJSONType()) {
+		return keep_json ? "json" : "string";
+	}
 	switch (type.id()) {
 	case LogicalTypeId::BOOLEAN:
 		return "boolean";
@@ -266,9 +268,10 @@ string GlueTypes::FromLogicalType(const LogicalType &type) {
 	case LogicalTypeId::VARIANT:
 		return "variant";
 	case LogicalTypeId::LIST:
-		return "array<" + FromLogicalType(ListType::GetChildType(type)) + ">";
+		return "array<" + ToGlueType(ListType::GetChildType(type), keep_json) + ">";
 	case LogicalTypeId::MAP:
-		return "map<" + FromLogicalType(MapType::KeyType(type)) + "," + FromLogicalType(MapType::ValueType(type)) + ">";
+		return "map<" + ToGlueType(MapType::KeyType(type), keep_json) + "," +
+		       ToGlueType(MapType::ValueType(type), keep_json) + ">";
 	case LogicalTypeId::STRUCT: {
 		vector<string> fields;
 		auto &children = StructType::GetChildTypes(type);
@@ -279,13 +282,46 @@ string GlueTypes::FromLogicalType(const LogicalType &type) {
 			    StringUtil::CharacterIsSpace(name.front()) || StringUtil::CharacterIsSpace(name.back())) {
 				throw NotImplementedException("Struct field name '%s' can not be stored in a Glue type", name);
 			}
-			fields.push_back(name + ":" + FromLogicalType(child.second));
+			fields.push_back(name + ":" + ToGlueType(child.second, keep_json));
 		}
 		return "struct<" + StringUtil::Join(fields, ",") + ">";
 	}
 	default:
 		throw NotImplementedException("DuckDB type '%s' can not be converted to a Glue type", type.ToString());
 	}
+}
+
+} // namespace
+
+LogicalType GlueTypes::ToLogicalType(const string &glue_type) {
+	GlueTypeParser parser(glue_type);
+	return parser.Parse();
+}
+
+LogicalType GlueTypes::ToLogicalType(const GlueColumn &column) {
+	auto duckdb_type = column.parameters.find(DUCKDB_TYPE_PARAMETER);
+	if (duckdb_type != column.parameters.end()) {
+		auto type = ToLogicalType(duckdb_type->second);
+		// ignored when another engine changed the Glue type since
+		if (FromLogicalType(type) == column.type) {
+			return type;
+		}
+	}
+	return ToLogicalType(column.type);
+}
+
+void GlueTypes::SetColumnType(GlueColumn &column, const LogicalType &type) {
+	column.type = FromLogicalType(type);
+	auto duckdb_type = ToGlueType(type, true);
+	if (duckdb_type == column.type) {
+		column.parameters.erase(DUCKDB_TYPE_PARAMETER);
+	} else {
+		column.parameters[DUCKDB_TYPE_PARAMETER] = duckdb_type;
+	}
+}
+
+string GlueTypes::FromLogicalType(const LogicalType &type) {
+	return ToGlueType(type, false);
 }
 
 Value GlueTypes::PartitionValue(ClientContext &context, const string &key, const string &str_value,

@@ -1,0 +1,114 @@
+# name: test/sql/hive/ddl/create_table/create_table_json_columns.test
+# description: JSON columns are a Glue string, with the DuckDB type kept in the column parameter duckdb.type
+# group: [create_table]
+
+require httpfs
+
+require parquet
+
+require json
+
+require glue
+
+require-env GLUE_CATALOG_ID
+
+statement ok
+attach '{GLUE_CATALOG_ID}' as my_datalake (
+    TYPE glue,
+    ENDPOINT '{GLUE_ENDPOINT}',
+    DEFAULT_LOCATION '{DEFAULT_S3_LOCATION}/{TEST_DIR}'
+);
+
+statement ok
+DROP TABLE IF EXISTS my_datalake.default.jsontype;
+
+statement ok
+DROP TABLE IF EXISTS my_datalake.default.jsontype_csv;
+
+statement ok
+CREATE TABLE my_datalake.default.jsontype (
+  id INTEGER,
+  j JSON,
+  l JSON[],
+  s STRUCT(k VARCHAR, m MAP(VARCHAR, JSON)),
+  v VARCHAR
+);
+
+query III
+SELECT c->>'Name', c->>'Type', c->'Parameters' FROM (SELECT unnest(response.StorageDescriptor.Columns::JSON[]) AS c FROM glue_get_table_response('my_datalake.default.jsontype'));
+----
+id	int	NULL
+j	string	{"duckdb.type":"json"}
+l	array<string>	{"duckdb.type":"array<json>"}
+s	struct<k:string,m:map<string,string>>	{"duckdb.type":"struct<k:string,m:map<string,json>>"}
+v	string	NULL
+
+statement ok
+INSERT INTO my_datalake.default.jsontype VALUES (1, '{"duck": 42}', ['[1, 2]'], {'k': 'a', 'm': MAP {'x': '{}'}}, '{"goose": 43}');
+
+statement ok
+DETACH my_datalake;
+
+statement ok
+attach '{GLUE_CATALOG_ID}' as my_datalake (
+    TYPE glue,
+    ENDPOINT '{GLUE_ENDPOINT}',
+    DEFAULT_LOCATION '{DEFAULT_S3_LOCATION}/{TEST_DIR}'
+);
+
+query II
+SELECT column_name, data_type FROM duckdb_columns() WHERE database_name = 'my_datalake' AND table_name = 'jsontype' ORDER BY column_index;
+----
+id	INTEGER
+j	JSON
+l	JSON[]
+s	STRUCT(k VARCHAR, m MAP(VARCHAR, JSON))
+v	VARCHAR
+
+query IIIII
+SELECT typeof(j), j->>'duck', typeof(l), typeof(s), typeof(v) FROM my_datalake.default.jsontype;
+----
+JSON	42	JSON[]	STRUCT(k VARCHAR, m MAP(VARCHAR, JSON))	VARCHAR
+
+statement error
+INSERT INTO my_datalake.default.jsontype (id, j) VALUES (2, '[not a json]');
+----
+Malformed JSON
+
+# changing the type away from JSON drops the parameter, and back adds it
+statement ok
+ALTER TABLE my_datalake.default.jsontype ALTER COLUMN j TYPE VARCHAR;
+
+statement ok
+ALTER TABLE my_datalake.default.jsontype ALTER COLUMN v TYPE JSON;
+
+statement ok
+ALTER TABLE my_datalake.default.jsontype ADD COLUMN added JSON;
+
+query II
+SELECT column_name, data_type FROM duckdb_columns() WHERE database_name = 'my_datalake' AND table_name = 'jsontype' AND column_name IN ('j', 'v', 'added') ORDER BY column_index;
+----
+j	VARCHAR
+v	JSON
+added	JSON
+
+query II
+SELECT c->>'Name', c->'Parameters' FROM (SELECT unnest(response.StorageDescriptor.Columns::JSON[]) AS c FROM glue_get_table_response('my_datalake.default.jsontype')) WHERE c->>'Name' IN ('j', 'v');
+----
+j	NULL
+v	{"duckdb.type":"json"}
+
+# CTAS and csv
+statement ok
+CREATE TABLE my_datalake.default.jsontype_csv WITH (format = 'csv') AS SELECT '{"a": [1, 2]}'::JSON AS j;
+
+query II
+SELECT typeof(j), j->'a'->>1 FROM my_datalake.default.jsontype_csv;
+----
+JSON	2
+
+statement ok
+DROP TABLE my_datalake.default.jsontype;
+
+statement ok
+DROP TABLE my_datalake.default.jsontype_csv;

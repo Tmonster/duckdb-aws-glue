@@ -24,11 +24,11 @@ unique_ptr<CatalogEntry> GlueTableSet::CreateEntry(const GlueTableInfo &table) {
 	}
 	CreateTableInfo info(schema, Identifier(table.name));
 	for (auto &column : table.columns) {
-		info.columns.AddColumn(ColumnDefinition(Identifier(column.name), GlueTypes::ToLogicalType(column.type)));
+		info.columns.AddColumn(ColumnDefinition(Identifier(column.name), GlueTypes::ToLogicalType(column)));
 	}
 	// Hive tables store their partition columns separately, they are regular (trailing) columns for a scan
 	for (auto &column : table.partition_keys) {
-		info.columns.AddColumn(ColumnDefinition(Identifier(column.name), GlueTypes::ToLogicalType(column.type)));
+		info.columns.AddColumn(ColumnDefinition(Identifier(column.name), GlueTypes::ToLogicalType(column)));
 	}
 	auto entry = make_uniq<GlueTable>(catalog, schema, info, table);
 	SetTableTypeTag(*entry);
