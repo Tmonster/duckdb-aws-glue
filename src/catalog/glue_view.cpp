@@ -51,7 +51,8 @@ unique_ptr<CreateInfo> GlueView::GetInfo() const {
 		                              table_info.name, unsupported_reason);
 	}
 	try {
-		view_info.query = CreateViewInfo::ParseSelect(select_sql);
+		auto parser = Parser::GetBuiltinParser();
+		view_info.query = CreateViewInfo::ParseSelect(parser, select_sql);
 	} catch (std::exception &ex) {
 		ErrorData error(ex);
 		throw NotImplementedException("Glue view \"%s.%s\" could not be parsed: %s", table_info.database_name,
