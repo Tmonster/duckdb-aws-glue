@@ -1,5 +1,6 @@
 #include "catalog/glue_view.hpp"
 #include "duckdb/common/error_data.hpp"
+#include "duckdb/common/exception.hpp"
 #include "duckdb/common/exception/binder_exception.hpp"
 #include "duckdb/common/sql_identifier.hpp"
 #include "duckdb/common/string_util.hpp"
@@ -35,6 +36,26 @@ const SelectStatement &GlueView::GetQuery() {
 
 string GlueView::ToSQL() const {
 	return sql;
+}
+
+unique_ptr<CreateInfo> GlueView::GetInfo() const {
+	auto result = ViewCatalogEntry::GetInfo();
+	auto &view_info = result->Cast<CreateViewInfo>();
+	if (view_info.query) {
+		return result;
+	}
+	if (!IsSupported()) {
+		throw NotImplementedException("Glue view \"%s.%s\" has no DuckDB definition: %s", table_info.database_name,
+		                              table_info.name, unsupported_reason);
+	}
+	try {
+		view_info.query = CreateViewInfo::ParseSelect(select_sql);
+	} catch (std::exception &ex) {
+		ErrorData error(ex);
+		throw NotImplementedException("Glue view \"%s.%s\" could not be parsed: %s", table_info.database_name,
+		                              table_info.name, error.RawMessage());
+	}
+	return result;
 }
 
 unique_ptr<CatalogEntry> GlueView::Copy(ClientContext &context) const {

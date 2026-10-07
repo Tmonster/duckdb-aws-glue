@@ -1,0 +1,120 @@
+# name: test/sql/hive/dml/unsupported_statements.test
+# description: Statements Hive tables in Glue do not support name the statement and the table instead of a generic error
+# group: [dml]
+
+require httpfs
+
+require glue
+
+require-env GLUE_CATALOG_ID
+
+statement ok
+attach '{GLUE_CATALOG_ID}' as my_datalake (
+    TYPE glue,
+    ENDPOINT '{GLUE_ENDPOINT}',
+    DEFAULT_LOCATION '{DEFAULT_S3_LOCATION}/{TEST_DIR}'
+);
+
+statement ok
+DROP TABLE IF EXISTS my_datalake.default.unsupported_t;
+
+statement ok
+DROP VIEW IF EXISTS my_datalake.default.unsupported_v;
+
+statement ok
+CREATE TABLE my_datalake.default.unsupported_t AS SELECT 1 AS i, {'a': 1} AS s;
+
+statement ok
+CREATE VIEW my_datalake.default.unsupported_v AS SELECT 1 AS one;
+
+statement error
+UPDATE my_datalake.default.unsupported_t SET i = 2;
+----
+Cannot UPDATE a Hive table ("unsupported_t" in Glue database "default")
+
+statement error
+PREPARE unsupported_update AS UPDATE my_datalake.default.unsupported_t SET i = ?;
+----
+Cannot UPDATE a Hive table ("unsupported_t" in Glue database "default")
+
+statement error
+EXPLAIN UPDATE my_datalake.default.unsupported_t SET i = 2;
+----
+Cannot UPDATE a Hive table ("unsupported_t" in Glue database "default")
+
+statement error
+DELETE FROM my_datalake.default.unsupported_t WHERE i = 1;
+----
+Cannot DELETE from a Hive table ("unsupported_t" in Glue database "default")
+
+statement error
+MERGE INTO my_datalake.default.unsupported_t USING (SELECT 1 AS i) src ON (src.i = unsupported_t.i) WHEN MATCHED THEN DELETE;
+----
+Cannot MERGE INTO a Hive table ("unsupported_t" in Glue database "default")
+
+statement error
+ANALYZE my_datalake.default.unsupported_t;
+----
+Cannot ANALYZE a Hive table ("unsupported_t" in Glue database "default")
+
+statement error
+VACUUM my_datalake.default.unsupported_t;
+----
+Cannot VACUUM a Hive table ("unsupported_t" in Glue database "default")
+
+statement error
+CREATE INDEX unsupported_idx ON my_datalake.default.unsupported_t (i);
+----
+Cannot CREATE INDEX on a Hive table ("unsupported_t" in Glue database "default")
+
+statement error
+CREATE TRIGGER unsupported_trg AFTER INSERT ON my_datalake.default.unsupported_t INSERT INTO my_datalake.default.unsupported_t VALUES (2, NULL);
+----
+CREATE TRIGGER is not supported for tables in a Glue catalog, the trigger is on a Hive table ("unsupported_t" in Glue database "default")
+
+statement error
+ALTER TABLE my_datalake.default.unsupported_t RENAME TO unsupported_t2;
+----
+ALTER TABLE ... RENAME TO is not supported for Glue tables (table "unsupported_t")
+
+statement error
+ALTER TABLE my_datalake.default.unsupported_t RENAME COLUMN i TO j;
+----
+ALTER TABLE ... RENAME COLUMN is not supported for Glue tables (table "unsupported_t")
+
+statement error
+ALTER TABLE my_datalake.default.unsupported_t ALTER COLUMN i SET DEFAULT 3;
+----
+ALTER TABLE ... ALTER COLUMN ... SET DEFAULT is not supported for Glue tables (table "unsupported_t")
+
+statement error
+ALTER TABLE my_datalake.default.unsupported_t ALTER COLUMN i SET NOT NULL;
+----
+ALTER TABLE ... ALTER COLUMN ... SET NOT NULL is not supported for Glue tables (table "unsupported_t")
+
+statement error
+ALTER TABLE my_datalake.default.unsupported_t ADD COLUMN s.b INTEGER;
+----
+ALTER TABLE ... ADD COLUMN on a struct field is not supported for Glue tables (table "unsupported_t")
+
+statement error
+ALTER TABLE my_datalake.default.unsupported_t ADD PRIMARY KEY (i);
+----
+ALTER TABLE ... ADD PRIMARY KEY / UNIQUE is not supported for a Hive table ("unsupported_t" in Glue database "default")
+
+statement error
+ALTER VIEW my_datalake.default.unsupported_v RENAME TO unsupported_v2;
+----
+Renaming a view is not supported for Glue views
+
+# the table is unchanged: none of the statements above reached Glue
+query II
+SELECT i, s FROM my_datalake.default.unsupported_t;
+----
+1	{'a': 1}
+
+statement ok
+DROP VIEW my_datalake.default.unsupported_v;
+
+statement ok
+DROP TABLE my_datalake.default.unsupported_t;

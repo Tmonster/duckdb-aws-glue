@@ -23,6 +23,8 @@ public:
 
 	//! Re-fetch the table definition from Glue
 	GlueTableInfo RefreshTableInfo(ClientContext &context) const;
+	//! "a Hive table ("t" in Glue database "db")", for the errors of statements Glue tables do not support
+	string DescribeForError() const;
 
 private:
 	//! Scan a Hive table with read_parquet over the files of the partitions Glue lists (or the table location for an

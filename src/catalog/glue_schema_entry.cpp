@@ -592,6 +592,62 @@ void GlueSchemaEntry::AlterTableProperties(ClientContext &context, AlterTableInf
 	tables.CreateEntry(tables.CreateEntry(updated));
 }
 
+//! The ALTER statement an AlterInfo comes from, for the errors of the ones Glue tables do not support
+static string AlterStatementName(const AlterInfo &info) {
+	switch (info.type) {
+	case AlterType::ALTER_VIEW:
+		return "ALTER VIEW";
+	case AlterType::ALTER_SEQUENCE:
+		return "ALTER SEQUENCE";
+	case AlterType::CHANGE_OWNERSHIP:
+		return "ALTER SEQUENCE ... OWNED BY";
+	case AlterType::SET_COMMENT:
+		return "COMMENT ON TABLE";
+	case AlterType::SET_COLUMN_COMMENT:
+		return "COMMENT ON COLUMN";
+	case AlterType::ALTER_TABLE:
+		break;
+	default:
+		return StringUtil::Replace(EnumUtil::ToString(info.type), "_", " ");
+	}
+	switch (info.Cast<AlterTableInfo>().alter_table_type) {
+	case AlterTableType::RENAME_COLUMN:
+		return "ALTER TABLE ... RENAME COLUMN";
+	case AlterTableType::RENAME_TABLE:
+		return "ALTER TABLE ... RENAME TO";
+	case AlterTableType::ADD_COLUMN:
+		return "ALTER TABLE ... ADD COLUMN";
+	case AlterTableType::REMOVE_COLUMN:
+		return "ALTER TABLE ... DROP COLUMN";
+	case AlterTableType::ALTER_COLUMN_TYPE:
+		return "ALTER TABLE ... ALTER COLUMN ... TYPE";
+	case AlterTableType::SET_DEFAULT:
+		return "ALTER TABLE ... ALTER COLUMN ... SET DEFAULT";
+	case AlterTableType::FOREIGN_KEY_CONSTRAINT:
+		return "ALTER TABLE ... ADD FOREIGN KEY";
+	case AlterTableType::SET_NOT_NULL:
+		return "ALTER TABLE ... ALTER COLUMN ... SET NOT NULL";
+	case AlterTableType::DROP_NOT_NULL:
+		return "ALTER TABLE ... ALTER COLUMN ... DROP NOT NULL";
+	case AlterTableType::SET_COLUMN_COMMENT:
+		return "COMMENT ON COLUMN";
+	case AlterTableType::ADD_CONSTRAINT:
+		return "ALTER TABLE ... ADD CONSTRAINT";
+	case AlterTableType::SET_PARTITIONED_BY:
+		return "ALTER TABLE ... SET PARTITIONED BY";
+	case AlterTableType::SET_SORTED_BY:
+		return "ALTER TABLE ... SET SORTED BY";
+	case AlterTableType::ADD_FIELD:
+		return "ALTER TABLE ... ADD COLUMN on a struct field";
+	case AlterTableType::REMOVE_FIELD:
+		return "ALTER TABLE ... DROP COLUMN on a struct field";
+	case AlterTableType::RENAME_FIELD:
+		return "ALTER TABLE ... RENAME COLUMN on a struct field";
+	default:
+		return "ALTER TABLE ... " + EnumUtil::ToString(info.Cast<AlterTableInfo>().alter_table_type);
+	}
+}
+
 void GlueSchemaEntry::Alter(CatalogTransaction transaction, AlterInfo &info) {
 	auto &context = transaction.GetContext();
 	GlueCatalog::ThrowIfInExplicitTransaction(context);
@@ -606,9 +662,8 @@ void GlueSchemaEntry::Alter(CatalogTransaction transaction, AlterInfo &info) {
 	}
 	if (entry->type == CatalogType::VIEW_ENTRY) {
 		if (info.type == AlterType::ALTER_VIEW) {
-			throw NotImplementedException(
-			    "Glue cannot rename a view; use CREATE OR REPLACE VIEW under the new name and DROP "
-			    "VIEW the old one");
+			throw NotImplementedException("Renaming a view is not supported for Glue views: use CREATE OR REPLACE VIEW "
+			                              "under the new name and DROP VIEW the old one");
 		}
 		if (info.type == AlterType::SET_COMMENT) {
 			throw NotImplementedException("Comments on Glue views are not supported yet");
@@ -622,7 +677,8 @@ void GlueSchemaEntry::Alter(CatalogTransaction transaction, AlterInfo &info) {
 		                              table_name, glue_table.table_info.GetFormatName());
 	}
 	if (info.type != AlterType::ALTER_TABLE) {
-		throw NotImplementedException("Only ALTER TABLE is supported for Glue tables");
+		throw NotImplementedException("%s is not supported for Glue tables (table \"%s\")", AlterStatementName(info),
+		                              table_name);
 	}
 	auto &alter_table = info.Cast<AlterTableInfo>();
 	if (alter_table.alter_table_type == AlterTableType::SET_TABLE_OPTIONS ||
@@ -727,8 +783,8 @@ void GlueSchemaEntry::Alter(CatalogTransaction transaction, AlterInfo &info) {
 		break;
 	}
 	default:
-		throw NotImplementedException("ALTER TABLE %s is not supported for Glue tables",
-		                              EnumUtil::ToString(alter_table.alter_table_type));
+		throw NotImplementedException("%s is not supported for Glue tables (table \"%s\")", AlterStatementName(info),
+		                              table_name);
 	}
 
 	GlueAPI::UpdateTableColumns(context, glue_catalog, database_info.name, table_name, columns);

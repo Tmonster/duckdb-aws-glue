@@ -1,0 +1,11 @@
+# Runs once per test (init_sqllogic in local_glue_duckdb_tests.json): start from an empty Glue database, a failed
+# earlier attempt of the same test leaves its tables behind and Glue has no transactions to roll them back
+
+statement ok
+DROP SCHEMA IF EXISTS my_datalake."{TEST_NAME__NO_SLASH}" CASCADE;
+
+statement ok
+CREATE SCHEMA my_datalake."{TEST_NAME__NO_SLASH}";
+
+statement ok
+USE my_datalake."{TEST_NAME__NO_SLASH}";

@@ -52,3 +52,43 @@ jobs:
       - name: Server logs
         if: always()
         run: docker compose -f scripts/docker-compose.yml logs --no-color moto | tail -200
+
+  # DuckDB's own test/sql tests against the same local servers, every test in its own Glue database
+  # (test/configs/local_glue_duckdb_tests.json). A release build: these are thousands of tests.
+  local-glue-duckdb-tests:
+    runs-on: ubuntu-latest
+
+    env:
+      VCPKG_TOOLCHAIN_PATH: ${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
+      GEN: ninja
+      AWS_EC2_METADATA_DISABLED: "true"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: docker/setup-compose-action@v1
+
+      - name: Start Glue (moto) and S3 (SeaweedFS)
+        run: docker compose -f scripts/docker-compose.yml up -d --wait
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -y -qq
+          sudo apt-get install -y -qq ninja-build ccache
+
+      - name: Setup vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgGitCommitId: cd61e1e26a038e82d6550a3ebbe0fbbfe7da78e3 # Release 2026.06.2
+
+      - name: Build
+        run: make release
+
+      - name: Run duckdb/duckdb tests
+        run: make test-duckdb-local TEST_BUILD=release
+
+      - name: Server logs
+        if: always()
+        run: docker compose -f scripts/docker-compose.yml logs --no-color moto | tail -200

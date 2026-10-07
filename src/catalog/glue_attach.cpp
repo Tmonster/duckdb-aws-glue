@@ -1,4 +1,5 @@
 #include "catalog/glue_attach.hpp"
+#include "catalog/glue_client_state.hpp"
 
 #include "duckdb/common/exception.hpp"
 #include "duckdb/common/string_util.hpp"
@@ -43,6 +44,8 @@ void SanityCheckGlueCatalogPath(const string &path) {
 unique_ptr<Catalog> GlueAttach::Attach(optional_ptr<StorageExtensionInfo> storage_info, ClientContext &context,
                                        AttachedDatabase &db, const string &name, AttachInfo &info,
                                        AttachOptions &options) {
+	// the connections opened before the extension was loaded have no GlueClientState yet
+	GlueClientState::Get(context);
 	GlueAttachOptions attach_options;
 	attach_options.name = name;
 	attach_options.path = info.path;

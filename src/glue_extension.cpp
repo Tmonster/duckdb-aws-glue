@@ -15,6 +15,7 @@
 
 #include <aws/core/Aws.h>
 #include "catalog/glue_catalog.hpp"
+#include "catalog/glue_client_state.hpp"
 #include "catalog/glue_transaction_manager.hpp"
 
 namespace duckdb {
@@ -70,6 +71,8 @@ static void LoadInternal(ExtensionLoader &loader) {
 	                          "When a scan reads at least this many partitions below the table location, the location "
 	                          "is listed once (recursively) instead of one listing per partition. Default 10.",
 	                          LogicalType::UBIGINT, Value::UBIGINT(10));
+
+	ExtensionCallback::Register(config, make_shared_ptr<GlueClientStateCallback>());
 
 	// The HTTP client factory has to be in place before the first AWS client is constructed
 	InitAWSAPI();

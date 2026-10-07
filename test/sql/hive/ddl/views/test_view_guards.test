@@ -32,7 +32,7 @@ CREATE VIEW my_datalake.default.vg_view AS SELECT id FROM vg_table;
 statement error
 ALTER VIEW my_datalake.default.vg_view RENAME TO vg_renamed;
 ----
-Glue cannot rename a view
+Renaming a view is not supported for Glue views
 
 statement error
 COMMENT ON VIEW my_datalake.default.vg_view IS 'a comment';

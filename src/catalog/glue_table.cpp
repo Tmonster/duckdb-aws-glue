@@ -1,4 +1,5 @@
 #include "catalog/glue_table.hpp"
+#include "catalog/glue_client_state.hpp"
 
 #include "duckdb/catalog/catalog_entry/schema_catalog_entry.hpp"
 #include "duckdb/common/exception.hpp"
@@ -50,7 +51,31 @@ GlueTableInfo GlueTable::RefreshTableInfo(ClientContext &context) const {
 //===--------------------------------------------------------------------===//
 // Scan
 //===--------------------------------------------------------------------===//
+string GlueTable::DescribeForError() const {
+	string kind;
+	switch (table_info.GetFormat()) {
+	case GlueTableFormat::HIVE:
+		kind = "a Hive table";
+		break;
+	case GlueTableFormat::ICEBERG:
+		kind = "an Iceberg table";
+		break;
+	case GlueTableFormat::DELTA:
+		kind = "a Delta table";
+		break;
+	case GlueTableFormat::HUDI:
+		kind = "a Hudi table";
+		break;
+	default:
+		kind = "a table";
+		break;
+	}
+	return StringUtil::Format("%s (\"%s\" in Glue database \"%s\")", kind, name.GetIdentifierName(),
+	                          schema.name.GetIdentifierName());
+}
+
 TableFunction GlueTable::GetScanFunction(ClientContext &context, unique_ptr<FunctionData> &bind_data) {
+	GlueClientState::Get(context).AddBoundTable(*this);
 	// Ask Glue what kind of table this is right before scanning: only Hive (Glue native) tables can be read
 	auto latest_info = RefreshTableInfo(context);
 	switch (latest_info.GetFormat()) {

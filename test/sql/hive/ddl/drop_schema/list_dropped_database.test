@@ -1,0 +1,42 @@
+# name: test/sql/hive/ddl/drop_schema/list_dropped_database.test
+# description: Listing the tables of a catalog whose cached database was dropped by another session lists it as empty
+# group: [drop_schema]
+
+require httpfs
+
+require glue
+
+require-env GLUE_CATALOG_ID
+
+statement ok
+attach '{GLUE_CATALOG_ID}' as my_datalake (
+    TYPE glue,
+    ENDPOINT '{GLUE_ENDPOINT}',
+    DEFAULT_LOCATION '{DEFAULT_S3_LOCATION}/{TEST_DIR}'
+);
+
+statement ok
+attach '{GLUE_CATALOG_ID}' as other_session (
+    TYPE glue,
+    ENDPOINT '{GLUE_ENDPOINT}',
+    DEFAULT_LOCATION '{DEFAULT_S3_LOCATION}/{TEST_DIR}'
+);
+
+statement ok
+DROP SCHEMA IF EXISTS my_datalake.list_dropped_db CASCADE;
+
+statement ok
+CREATE SCHEMA my_datalake.list_dropped_db;
+
+query I
+SELECT count(*) FROM duckdb_schemas() WHERE database_name = 'my_datalake' AND schema_name = 'list_dropped_db';
+----
+1
+
+statement ok
+DROP SCHEMA other_session.list_dropped_db;
+
+query I
+SELECT count(*) FROM duckdb_tables() WHERE database_name = 'my_datalake' AND schema_name = 'list_dropped_db';
+----
+0

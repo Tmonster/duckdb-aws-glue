@@ -112,7 +112,8 @@ of schemas, tables and views, `CREATE TABLE ... AS`, the partition SQL, or `glue
   `CREATE VIEW ... WITH (DEFER_BINDING)` create a Glue view (a table of type `VIRTUAL_VIEW`) marked as written by DuckDB.
   `OR REPLACE` updates it in place. Unqualified table names in the SELECT refer to the view's own database.
 - `SHOW [ALL] TABLES`, `duckdb_views()`, `information_schema.views` and `duckdb_columns()` list every view of a database,
-  including views written by other engines. Only views written by DuckDB can be queried, replaced or dropped.
+  including views written by other engines. Only views written by DuckDB can be queried, replaced or dropped, and
+  `EXPORT DATABASE` / `COPY FROM DATABASE` of a catalog with any other view fails naming that view.
 - `DROP VIEW [IF EXISTS] db.v` deletes the view.
 - `ALTER VIEW ... RENAME` and `COMMENT ON VIEW` are not supported.
 
@@ -253,6 +254,16 @@ the output. `TEST_BUILD=release` runs the `release` build instead of
 
 Every test creates the tables it needs and writes under its own `{TEST_DIR}` prefix, so runs do not interfere with
 each other; `make glue-fixture-down` throws the containers and their data away.
+
+`make test-duckdb-local` runs DuckDB's own `test/sql` tests (`.test_slow` excluded) against the same local servers
+with `test/configs/local_glue_duckdb_tests.json`, in parallel (`TEST_WORKERS=8`) and with retries: every test gets
+its own Glue database, made the default schema, so its tables are Hive tables. The database is dropped and recreated
+before each test (`local_glue_duckdb_tests_init.sqllogic`) and dropped after it, and every connection attaches with
+its own `DEFAULT_LOCATION` prefix (`{UUID}`), because dropped tables leave their files behind and a retry would read
+them. Errors of features Glue does not have (constraints, transactions, UPDATE/DELETE, sequences, ...) skip the rest
+of a test (`skip_error_messages`); tests that give a different answer are listed by path in `skip_tests` with the
+reason, known bugs among them. Tests that create schemas with fixed names (`s1`, ...) share them across all tests,
+so start from a fresh fixture (`make glue-fixture-down glue-fixture`).
 
 The benchmarks under `benchmark/` read from the same local servers. They build their tables in the `load` step and
 use `debug_fs_delay_mean_ms` to add latency to every file open and read, standing in for the S3 round trip the local

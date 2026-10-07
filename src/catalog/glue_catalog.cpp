@@ -314,22 +314,30 @@ PhysicalOperator &GlueCatalog::PlanCreateTableAs(ClientContext &context, Physica
 
 PhysicalOperator &GlueCatalog::PlanDelete(ClientContext &context, PhysicalPlanGenerator &planner, LogicalDelete &op,
                                           PhysicalOperator &plan) {
-	throw NotImplementedException("DELETE is not supported for Glue tables");
+	throw NotImplementedException("Cannot DELETE from %s", op.table.Cast<GlueTable>().DescribeForError());
 }
 
 PhysicalOperator &GlueCatalog::PlanUpdate(ClientContext &context, PhysicalPlanGenerator &planner, LogicalUpdate &op,
                                           PhysicalOperator &plan) {
-	throw NotImplementedException("UPDATE is not supported for Glue tables");
+	throw NotImplementedException("Cannot UPDATE %s", op.table.Cast<GlueTable>().DescribeForError());
 }
 
 PhysicalOperator &GlueCatalog::PlanMergeInto(ClientContext &context, PhysicalPlanGenerator &planner,
                                              LogicalMergeInto &op, PhysicalOperator &plan) {
-	throw NotImplementedException("MERGE INTO is not supported for Glue tables");
+	throw NotImplementedException("Cannot MERGE INTO %s", op.table.Cast<GlueTable>().DescribeForError());
 }
 
 unique_ptr<LogicalOperator> GlueCatalog::BindCreateIndex(Binder &binder, CreateStatement &stmt,
                                                          TableCatalogEntry &table, unique_ptr<LogicalOperator> plan) {
-	throw NotImplementedException("Indexes are not supported for Glue catalogs");
+	throw NotImplementedException("Cannot CREATE INDEX on %s", table.Cast<GlueTable>().DescribeForError());
+}
+
+unique_ptr<LogicalOperator> GlueCatalog::BindAlterAddIndex(Binder &binder, TableCatalogEntry &table_entry,
+                                                           unique_ptr<LogicalOperator> plan,
+                                                           unique_ptr<CreateIndexInfo> create_info,
+                                                           unique_ptr<AlterTableInfo> alter_info) {
+	throw NotImplementedException("ALTER TABLE ... ADD PRIMARY KEY / UNIQUE is not supported for %s",
+	                              table_entry.Cast<GlueTable>().DescribeForError());
 }
 
 //===--------------------------------------------------------------------===//

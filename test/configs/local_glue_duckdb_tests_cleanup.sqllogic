@@ -1,0 +1,7 @@
+# Runs after each test body (cleanup_sqllogic in local_glue_duckdb_tests.json): every database moto keeps makes the
+# Glue listings of all later tests slower. A test may have detached the catalog, so a failure here is fine
+
+statement maybe
+DROP SCHEMA IF EXISTS my_datalake."{TEST_NAME__NO_SLASH}" CASCADE;
+----
+<REGEX>:.*

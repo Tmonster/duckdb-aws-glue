@@ -29,6 +29,10 @@ vector<GlueTableInfo> GlueAPI::GetTables(ClientContext &context, GlueCatalog &ca
 			request.SetNextToken(next_token);
 		}
 		auto outcome = client->GetTables(request);
+		// another session dropped the database since it was listed
+		if (IsEntityNotFound(outcome)) {
+			return {};
+		}
 		if (!outcome.IsSuccess()) {
 			ThrowGlueError(outcome, StringUtil::Format("GetTables (database '%s')", database_name));
 		}

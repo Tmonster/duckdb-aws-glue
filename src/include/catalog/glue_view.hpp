@@ -20,6 +20,8 @@ public:
 	unique_ptr<CatalogEntry> Copy(ClientContext &context) const override;
 	//! The stored text, without parsing it
 	string ToSQL() const override;
+	//! With the parsed query, which the entry only parses on first use; throws for a view DuckDB can not use
+	unique_ptr<CreateInfo> GetInfo() const override;
 
 	//! Build the view entry for a VIRTUAL_VIEW Glue table
 	static unique_ptr<GlueView> FromTableInfo(Catalog &catalog, SchemaCatalogEntry &schema, const GlueTableInfo &table);
