@@ -54,24 +54,19 @@ jobs:
         run: docker compose -f scripts/docker-compose.yml logs --no-color moto | tail -200
 
   # DuckDB's own test/sql tests against the same local servers, every test in its own Glue database
-  # (test/configs/local_glue_duckdb_tests.json). A release build: these are thousands of tests.
-  local-glue-duckdb-tests:
+  # (test/configs/local_glue_duckdb_tests.json). A release build: these are thousands of tests, so one job builds and
+  # the test jobs each run a shard of them against their own servers.
+  local-glue-duckdb-tests-build:
     runs-on: ubuntu-latest
 
     env:
       VCPKG_TOOLCHAIN_PATH: ${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
       GEN: ninja
-      AWS_EC2_METADATA_DISABLED: "true"
 
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-
-      - uses: docker/setup-compose-action@v1
-
-      - name: Start Glue (moto) and S3 (SeaweedFS)
-        run: docker compose -f scripts/docker-compose.yml up -d --wait
 
       - name: Install build dependencies
         run: |
@@ -86,8 +81,50 @@ jobs:
       - name: Build
         run: make release
 
+      # unittest finds libduckdb.so through an absolute RUNPATH, so it is unpacked at the same path; tar keeps the
+      # executable bits that upload-artifact drops
+      - name: Pack unittest
+        run: tar -cf unittest.tar build/release/test/unittest build/release/src/libduckdb.so
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: duckdb-tests-unittest
+          path: unittest.tar
+          retention-days: 1
+
+  local-glue-duckdb-tests:
+    needs: local-glue-duckdb-tests-build
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+
+    env:
+      AWS_EC2_METADATA_DISABLED: "true"
+
+    name: local-glue-duckdb-tests (${{ matrix.shard }})
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - uses: docker/setup-compose-action@v1
+
+      - name: Start Glue (moto) and S3 (SeaweedFS)
+        run: docker compose -f scripts/docker-compose.yml up -d --wait
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: duckdb-tests-unittest
+
+      - name: Unpack unittest
+        run: tar -xf unittest.tar
+
       - name: Run duckdb/duckdb tests
-        run: make test-duckdb-local TEST_BUILD=release
+        run: make test-duckdb-local TEST_BUILD=release TEST_SHARDS=${{ strategy.job-total }} TEST_SHARD=${{ strategy.job-index }}
 
       - name: Server logs
         if: always()

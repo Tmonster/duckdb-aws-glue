@@ -124,7 +124,7 @@
       ]
     },
     {
-      "reason": "BUG: CREATE TABLE silently drops COLLATE, comparisons become case and accent sensitive",
+      "reason": "BUG: CREATE TABLE and ALTER COLUMN ... TYPE silently drop COLLATE, comparisons become case and accent sensitive",
       "paths": [
         "test/sql/collate/collate_string_col.test",
         "test/sql/collate/test_collate_accent_insensitive.test",
@@ -132,7 +132,11 @@
         "test/sql/collate/test_collate_list_contains.test",
         "test/sql/collate/test_combined_collation.test",
         "test/sql/storage/catalog/store_collate.test",
-        "test/sql/window/test_window_order_collate.test"
+        "test/sql/window/test_window_order_collate.test",
+        "test/sql/collate/collate_struct_minmax.test",
+        "test/sql/alter/alter_col/test_set_collate.test",
+        "test/sql/sql_export/plain_scope_results.test",
+        "test/sql/sql_export/grouped_mark_roundtrip.test"
       ]
     },
     {
@@ -141,7 +145,8 @@
         "test/sql/function/timestamp/test_strftime_timestamp_ns.test",
         "test/sql/storage/types/test_timestamp_storage.test",
         "test/sql/types/timestamp/test_timestamp_types.test",
-        "test/sql/types/timestamp/timestamp_precision.test"
+        "test/sql/types/timestamp/timestamp_precision.test",
+        "test/sql/timezone/test_icu_casts.test"
       ]
     },
     {
@@ -183,7 +188,8 @@
         "test/sql/sql_export/ci_reconstruction.test",
         "test/sql/sql_export/expression_results.test",
         "test/sql/sql_export/recursive_payload_results.test",
-        "test/sql/tpcds/tpcds_sf0.test"
+        "test/sql/tpcds/tpcds_sf0.test",
+        "test/sql/sql_export/composition_q1.test"
       ]
     },
     {
@@ -339,7 +345,10 @@
         "test/sql/types/nested/map/test_map_values.test",
         "test/sql/types/struct/nested_structs.test",
         "test/sql/types/variant/implicit_cast_from_variant.test",
-        "test/sql/window/window_mtcars.test"
+        "test/sql/window/window_mtcars.test",
+        "test/sql/catalog/test_create_from_select.test",
+        "test/sql/generated_columns/virtual/alter_table.test",
+        "test/sql/function/timestamp/test_icu_datediff.test"
       ]
     },
     {
@@ -435,7 +444,11 @@
         "test/sql/table_function/duckdb_schemas.test",
         "test/sql/table_function/duckdb_tables.test",
         "test/sql/table_function/duckdb_views.test",
-        "test/sql/trigger/create_trigger_parse.test"
+        "test/sql/trigger/create_trigger_parse.test",
+        "test/sql/catalog/test_temporary_schema.test",
+        "test/sql/table_function/test_information_schema_columns.test",
+        "test/sql/settings/setting_preserve_identifier_case.test",
+        "test/sql/table_function/information_schema.test"
       ]
     },
     {
@@ -558,7 +571,10 @@
         "test/sql/storage/types/variant/variant_object_key_order_shredded_json.test",
         "test/sql/storage/types/variant/variant_shredding_omit_untyped.test",
         "test/sql/table_function/duckdb_databases.test",
-        "test/sql/transactions/test_commit_cleanup_oom.test"
+        "test/sql/transactions/test_commit_cleanup_oom.test",
+        "test/sql/storage/checkpoint/test_checkpoint_abort_truncate.test",
+        "test/sql/storage/compression/constant/constant_negative_zero.test",
+        "test/sql/storage/wal/wal_torn_uncommitted_row_group.test"
       ]
     },
     {
@@ -627,7 +643,14 @@
         "test/sql/storage/unzip.test",
         "test/sql/storage/wal/test_wal_bc.test",
         "test/sql/tpcds/dsdgen_readonly.test",
-        "test/sql/tpch/dbgen_readonly.test"
+        "test/sql/tpch/dbgen_readonly.test",
+        "test/sql/storage/icu_collation.test",
+        "test/sql/storage/compression/dictionary/invalid_dictionary_metadata.test",
+        "test/sql/storage/compression/dictionary/dictionary_corrupt_null_index.test",
+        "test/sql/storage/compression/dictionary/dictionary_corrupt_count.test",
+        "test/sql/storage/compression/dictionary/dictionary_corrupt_count_consistent.test",
+        "test/sql/storage/compression/fsst/fsst_corrupt_escape_symbol_index.test",
+        "test/sql/storage/compression/fsst/fsst_corrupt_decoded_length.test"
       ]
     },
     {

@@ -284,7 +284,9 @@ its own `DEFAULT_LOCATION` prefix (`{UUID}`), because dropped tables leave their
 them. Errors of features Glue does not have (constraints, transactions, UPDATE/DELETE, sequences, ...) skip the rest
 of a test (`skip_error_messages`); tests that give a different answer are listed by path in `skip_tests` with the
 reason, known bugs among them. Tests that create schemas with fixed names (`s1`, ...) share them across all tests,
-so start from a fresh fixture (`make glue-fixture-down glue-fixture`).
+so start from a fresh fixture (`make glue-fixture-down glue-fixture`). `TEST_SHARDS=<n> TEST_SHARD=<i>` (0-based)
+runs every n-th test of the sorted test list only; CI splits the tests over several runners this way, each with its own
+servers.
 
 The benchmarks under `benchmark/` read from the same local servers. They build their tables in the `load` step and
 use `debug_fs_delay_mean_ms` to add latency to every file open and read, standing in for the S3 round trip the local

@@ -30,9 +30,14 @@ test-local:
 	AWS_EC2_METADATA_DISABLED=true ASAN_OPTIONS=detect_container_overflow=0 $(PYTHON) duckdb/scripts/ci/run_tests.py ./build/$(TEST_BUILD)/test/unittest --test-config test/configs/local_glue.json --workers 1 --batch-size 1 --retry 2 'test/sql/*'
 # test-duckdb-local runs DuckDB's own test/sql tests against the local servers, every test in its own Glue database
 # (see test/configs/local_glue_duckdb_tests.json); .test_slow files are hidden by default but a name pattern pulls them
-# back in, so they are excluded by name
+# back in, so they are excluded by name. TEST_SHARDS/TEST_SHARD run every TEST_SHARDS-th test of the sorted list (CI
+# splits the tests over several runners this way)
 TEST_WORKERS ?= 8
+TEST_SHARDS ?= 1
+TEST_SHARD ?= 0
+DUCKDB_TEST_LIST=build/$(TEST_BUILD)/duckdb_tests_shard_$(TEST_SHARD)_of_$(TEST_SHARDS).txt
 test-duckdb-local:
-	AWS_EC2_METADATA_DISABLED=true ASAN_OPTIONS=detect_container_overflow=0 $(PYTHON) duckdb/scripts/ci/run_tests.py ./build/$(TEST_BUILD)/test/unittest --test-flags '--test-dir duckdb' --test-config test/configs/local_glue_duckdb_tests.json --workers $(TEST_WORKERS) --batch-size 1 --retry 2 --max-retries 50 'test/sql/*' 'exclude:*.test_slow'
+	./build/$(TEST_BUILD)/test/unittest --test-dir duckdb --list-tests 'test/sql/*' 'exclude:*.test_slow' | tail -n +2 | cut -f1 | LC_ALL=C sort | awk -v n=$(TEST_SHARDS) -v i=$(TEST_SHARD) '(NR - 1) % n == i' > $(DUCKDB_TEST_LIST)
+	AWS_EC2_METADATA_DISABLED=true ASAN_OPTIONS=detect_container_overflow=0 $(PYTHON) duckdb/scripts/ci/run_tests.py ./build/$(TEST_BUILD)/test/unittest --test-flags '--test-dir duckdb' --test-config test/configs/local_glue_duckdb_tests.json --workers $(TEST_WORKERS) --batch-size 1 --retry 2 --max-retries 50 --test-list $(DUCKDB_TEST_LIST)
 test-cloud:
 	AWS_EC2_METADATA_DISABLED=true ASAN_OPTIONS=detect_container_overflow=0 ./build/relassert/test/unittest --test-config test/configs/cloud_glue.json 'test/sql/*'
