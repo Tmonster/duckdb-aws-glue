@@ -338,6 +338,13 @@ optional_ptr<CatalogEntry> GlueSchemaEntry::CreateTable(CatalogTransaction trans
 	if (!base.constraints.empty()) {
 		throw NotImplementedException("Constraints are not supported when creating tables in a Glue catalog");
 	}
+	for (auto &column : base.columns.Logical()) {
+		if (column.Generated()) {
+			throw NotImplementedException(
+			    "Generated column \"%s\" is not supported when creating tables in a Glue catalog",
+			    column.Name().GetIdentifierName());
+		}
+	}
 	auto options = ParseCreateTableOptions(context, base);
 	// Hive partitions are columns: PARTITIONED BY must name columns of the table, which become the PartitionKeys
 	// (in the given order) and are stored in the directory names rather than in the data files
