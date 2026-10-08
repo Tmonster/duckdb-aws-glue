@@ -10,6 +10,9 @@ require iceberg
 
 require-env GLUE_CATALOG_ID
 
+# Glue's Iceberg REST endpoint, which moto does not serve
+require-env ICEBERG_SUPPORTED
+
 # Do not ignore 'HTTP' error messages!
 set ignore_error_messages
 
@@ -175,7 +178,7 @@ BEGIN;
 statement error
 INSERT INTO my_datalake.default.ice_dml_customers VALUES ('frank', 'IT');
 ----
-<REGEX>:.*Not implemented Error.*Iceberg table "ice_dml_customers" of a Glue catalog can not be used in an explicit transaction.*
+<REGEX>:.*TransactionContext Error.*Transaction support is not provided for Glue catalogs.*
 
 statement ok
 ROLLBACK;
@@ -186,7 +189,7 @@ BEGIN;
 statement error
 SELECT * FROM my_datalake.default.ice_dml_customers;
 ----
-<REGEX>:.*Not implemented Error.*Iceberg table "ice_dml_customers" of a Glue catalog can not be used in an explicit transaction.*
+<REGEX>:.*TransactionContext Error.*Transaction support is not provided for Glue catalogs.*
 
 statement ok
 ROLLBACK;
@@ -197,7 +200,7 @@ BEGIN;
 statement error
 UPDATE my_datalake.default.ice_dml_customers SET country = 'AT' WHERE customer = 'bob';
 ----
-<REGEX>:.*Not implemented Error.*can not be used in an explicit transaction.*
+<REGEX>:.*TransactionContext Error.*Transaction support is not provided for Glue catalogs.*
 
 statement ok
 ROLLBACK;
@@ -208,7 +211,7 @@ BEGIN;
 statement error
 DELETE FROM my_datalake.default.ice_dml_customers;
 ----
-<REGEX>:.*Not implemented Error.*can not be used in an explicit transaction.*
+<REGEX>:.*TransactionContext Error.*Transaction support is not provided for Glue catalogs.*
 
 statement ok
 ROLLBACK;

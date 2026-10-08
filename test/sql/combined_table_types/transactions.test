@@ -1,5 +1,5 @@
 # name: test/sql/combined_table_types/transactions.test
-# description: Hive tables can be used in explicit transactions, Iceberg tables can not
+# description: explicit transactions can read Hive tables, but can not use Iceberg tables at all
 # group: [combined_table_types]
 
 require httpfs
@@ -9,6 +9,9 @@ require glue
 require iceberg
 
 require-env GLUE_CATALOG_ID
+
+# Glue's Iceberg REST endpoint, which moto does not serve
+require-env ICEBERG_SUPPORTED
 
 # Do not ignore 'HTTP' error messages!
 set ignore_error_messages
@@ -38,17 +41,22 @@ CREATE TABLE my_datalake.default.mix_txn_iceberg (id INTEGER) WITH (table_type =
 statement ok
 INSERT INTO my_datalake.default.mix_txn_iceberg VALUES (1);
 
-# a Hive table works in a transaction, until the transaction uses an Iceberg table
+statement ok
+INSERT INTO my_datalake.default.mix_txn_hive VALUES (1);
+
+# a transaction can read a Hive table, but not an Iceberg table
 statement ok
 BEGIN;
 
-statement ok
-INSERT INTO my_datalake.default.mix_txn_hive VALUES (1);
+query I
+SELECT * FROM my_datalake.default.mix_txn_hive;
+----
+1
 
 statement error
 SELECT * FROM my_datalake.default.mix_txn_hive JOIN my_datalake.default.mix_txn_iceberg USING (id);
 ----
-<REGEX>:.*Not implemented Error.*Iceberg table "mix_txn_iceberg" of a Glue catalog can not be used in an explicit transaction.*
+<REGEX>:.*TransactionContext Error.*Transaction support is not provided for Glue catalogs.*
 
 statement ok
 ROLLBACK;
@@ -59,7 +67,7 @@ BEGIN;
 statement error
 INSERT INTO my_datalake.default.mix_txn_iceberg SELECT * FROM my_datalake.default.mix_txn_hive;
 ----
-<REGEX>:.*Not implemented Error.*can not be used in an explicit transaction.*
+<REGEX>:.*TransactionContext Error.*Transaction support is not provided for Glue catalogs.*
 
 statement ok
 ROLLBACK;
@@ -70,7 +78,7 @@ BEGIN;
 statement error
 INSERT INTO my_datalake.default.mix_txn_hive SELECT * FROM my_datalake.default.mix_txn_iceberg;
 ----
-<REGEX>:.*Not implemented Error.*can not be used in an explicit transaction.*
+<REGEX>:.*TransactionContext Error.*Transaction support is not provided for Glue catalogs.*
 
 statement ok
 ROLLBACK;
@@ -82,7 +90,7 @@ BEGIN;
 statement error
 CREATE TABLE my_datalake.default.mix_txn_iceberg_new (id INTEGER) WITH (table_type = 'iceberg');
 ----
-<REGEX>:.*Not implemented Error.*Iceberg table "mix_txn_iceberg_new" of a Glue catalog can not be used in an explicit transaction.*
+<REGEX>:.*TransactionContext Error.*Transaction support is not provided for Glue catalogs.*
 
 statement ok
 ROLLBACK;
@@ -93,7 +101,7 @@ BEGIN;
 statement error
 CREATE TABLE my_datalake.default.mix_txn_iceberg_new WITH (table_type = 'iceberg') AS SELECT 1 AS id;
 ----
-<REGEX>:.*Not implemented Error.*can not be used in an explicit transaction.*
+<REGEX>:.*TransactionContext Error.*Transaction support is not provided for Glue catalogs.*
 
 statement ok
 ROLLBACK;
@@ -109,7 +117,7 @@ BEGIN;
 statement error
 DROP TABLE my_datalake.default.mix_txn_iceberg;
 ----
-<REGEX>:.*Not implemented Error.*can not be used in an explicit transaction.*
+<REGEX>:.*TransactionContext Error.*Transaction support is not provided for Glue catalogs.*
 
 statement ok
 ROLLBACK;

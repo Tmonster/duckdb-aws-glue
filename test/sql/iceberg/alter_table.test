@@ -10,6 +10,9 @@ require iceberg
 
 require-env GLUE_CATALOG_ID
 
+# Glue's Iceberg REST endpoint, which moto does not serve
+require-env ICEBERG_SUPPORTED
+
 # Do not ignore 'HTTP' error messages!
 set ignore_error_messages
 

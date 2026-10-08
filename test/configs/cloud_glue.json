@@ -27,6 +27,10 @@
 		{
 			"env_name": "DEFAULT_S3_LOCATION",
 			"env_value": "s3://duckdb-glue-test-176760123605/warehouse"
+		},
+		{
+			"env_name": "ICEBERG_SUPPORTED",
+			"env_value": "true"
 		}
 	],
 	"skip_tests": [
@@ -35,6 +39,18 @@
 			"paths": [
 				"test/sql/hive/ddl/alter_partition/glue_repair_table.test",
 				"test/sql/hive/ddl/alter_partition/test_show_partitions.test"
+			]
+		},
+		{
+			"reason": "counts moto's single GetPartitions request per partition listing: AWS Glue lists in segments (glue_get_partitions_segments) and ends every listing with an extra, empty page",
+			"paths": [
+				"test/sql/hive/bugs/s3_plan_time_cost_invariants.test"
+			]
+		},
+		{
+			"reason": "AWS Glue stores column names in lower case ('Mixed Case' reads back as 'mixed case'); moto keeps them as given",
+			"paths": [
+				"test/sql/hive/ddl/alter_column/glue_replace_columns.test"
 			]
 		}
 	]
