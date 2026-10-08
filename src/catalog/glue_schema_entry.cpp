@@ -16,12 +16,14 @@
 #include "duckdb/planner/expression_binder/table_function_binder.hpp"
 #include "duckdb/execution/expression_executor.hpp"
 #include "duckdb/parser/parsed_data/create_table_info.hpp"
+#include "duckdb/parser/expression/cast_expression.hpp"
 #include "duckdb/parser/expression/columnref_expression.hpp"
 #include "duckdb/parser/expression/constant_expression.hpp"
 
 #include "core/glue_types.hpp"
 #include "duckdb/common/error_data.hpp"
 #include "duckdb/parser/parsed_data/create_view_info.hpp"
+#include "duckdb/parser/parser.hpp"
 #include "catalog/glue_view.hpp"
 #include "api/glue_api.hpp"
 #include "catalog/glue_catalog.hpp"
@@ -390,21 +392,12 @@ unique_ptr<BoundCreateTableInfo> GlueSchemaEntry::BindIcebergCreateTable(ClientC
 }
 
 optional_ptr<CatalogEntry> GlueSchemaEntry::CreateIcebergTable(ClientContext &context, BoundCreateTableInfo &info) {
-	CheckNoIcebergTransaction(context, info.Base().GetTableName().GetIdentifierName());
 	auto &iceberg_schema = catalog.Cast<GlueCatalog>().GetIcebergSchema(context, database_info.name);
 	auto iceberg_info = BindIcebergCreateTable(context, info, iceberg_schema);
 	auto entry = iceberg_schema.CreateTable(iceberg_schema.catalog.GetCatalogTransaction(context), *iceberg_info);
 	GlueTransaction::Get(context, catalog).AddIcebergTable(database_info.name,
 	                                                       info.Base().GetTableName().GetIdentifierName());
 	return entry;
-}
-
-void GlueSchemaEntry::CheckNoIcebergTransaction(ClientContext &context, const string &table_name) {
-	if (!context.transaction.IsAutoCommit()) {
-		throw NotImplementedException("Iceberg table \"%s\" of a Glue catalog can not be used in an explicit "
-		                              "transaction (BEGIN ... COMMIT), run the statement on its own",
-		                              table_name);
-	}
 }
 
 optional_ptr<GlueTable> GlueSchemaEntry::AsIcebergTable(optional_ptr<CatalogEntry> entry) {
@@ -420,6 +413,7 @@ optional_ptr<GlueTable> GlueSchemaEntry::AsIcebergTable(optional_ptr<CatalogEntr
 
 optional_ptr<CatalogEntry> GlueSchemaEntry::CreateTable(CatalogTransaction transaction, BoundCreateTableInfo &info) {
 	auto &context = transaction.GetContext();
+	GlueCatalog::ThrowIfInExplicitTransaction(context);
 	auto &glue_catalog = catalog.Cast<GlueCatalog>();
 	auto &base = info.Base();
 	auto table_name = base.GetTableName().GetIdentifierName();
@@ -522,6 +516,7 @@ optional_ptr<CatalogEntry> GlueSchemaEntry::CreateIndex(CatalogTransaction trans
 
 optional_ptr<CatalogEntry> GlueSchemaEntry::CreateView(CatalogTransaction transaction, CreateViewInfo &info) {
 	auto &context = transaction.GetContext();
+	GlueCatalog::ThrowIfInExplicitTransaction(context);
 	auto &glue_catalog = catalog.Cast<GlueCatalog>();
 	auto view_name = info.GetQualifiedName().Name().GetIdentifierName();
 
@@ -550,7 +545,8 @@ optional_ptr<CatalogEntry> GlueSchemaEntry::CreateView(CatalogTransaction transa
 	view.sql = GlueView::RenderViewSql(info);
 	try {
 		// what is stored must read back: never write a view DuckDB itself could not parse
-		CreateViewInfo::ParseSelect(view.sql);
+		auto parser = Parser::GetBuiltinParser();
+		CreateViewInfo::ParseSelect(parser, view.sql);
 	} catch (std::exception &ex) {
 		ErrorData error(ex);
 		throw InternalException("The SQL rendered for Glue view \"%s\" does not parse: %s\n%s", view_name,
@@ -608,10 +604,7 @@ optional_ptr<CatalogEntry> GlueSchemaEntry::CreateType(CatalogTransaction transa
 	throw BinderException("Glue databases do not support creating types");
 }
 
-namespace {
-
-//! Type changes Hive can read back from the existing parquet files: widening only
-bool IsAllowedHiveTypeChange(const LogicalType &from, const LogicalType &to) {
+bool GlueSchemaEntry::IsAllowedHiveTypeChange(const LogicalType &from, const LogicalType &to) {
 	if (from == to) {
 		return true;
 	}
@@ -642,10 +635,46 @@ bool IsAllowedHiveTypeChange(const LogicalType &from, const LogicalType &to) {
 	return false;
 }
 
-} // namespace
+//! The parameters GlueTableInfo::GetFormat() derives the table format from can not be set or reset: changing
+//! table_type on a Hive table would relabel it as Iceberg or Delta without a metadata file behind it.
+static void CheckTablePropertyChangeable(const string &key) {
+	if (key.empty()) {
+		throw InvalidInputException("A table property needs a name");
+	}
+	if (GlueTableInfo::IsFormatParameter(key)) {
+		throw InvalidInputException("Table property '%s' decides how the table is read and can not be changed "
+		                            "with ALTER TABLE",
+		                            key);
+	}
+}
+
+//! ALTER TABLE t SET (key = value, ...) / RESET (key, ...): Hive's SET / UNSET TBLPROPERTIES
+void GlueSchemaEntry::AlterTableProperties(ClientContext &context, AlterTableInfo &alter_table) {
+	auto &glue_catalog = catalog.Cast<GlueCatalog>();
+	auto table_name = alter_table.GetQualifiedName().Name().GetIdentifierName();
+	vector<pair<string, string>> set;
+	vector<string> unset;
+	if (alter_table.alter_table_type == AlterTableType::SET_TABLE_OPTIONS) {
+		auto &options = alter_table.Cast<SetTableOptionsInfo>();
+		for (auto &option : EvaluateOptions(context, options.table_options, "ALTER TABLE SET")) {
+			CheckTablePropertyChangeable(option.first);
+			// Glue stores every parameter as a string
+			set.emplace_back(option.first, option.second.DefaultCastAs(LogicalType::VARCHAR).GetValue<string>());
+		}
+	} else {
+		for (auto &option : alter_table.Cast<ResetTableOptionsInfo>().table_options) {
+			auto key = option.GetIdentifierName();
+			CheckTablePropertyChangeable(key);
+			unset.push_back(std::move(key));
+		}
+	}
+	GlueAPI::UpdateTableParameters(context, glue_catalog, database_info.name, table_name, set, unset);
+	RefreshTable(context, table_name);
+}
 
 void GlueSchemaEntry::Alter(CatalogTransaction transaction, AlterInfo &info) {
 	auto &context = transaction.GetContext();
+	GlueCatalog::ThrowIfInExplicitTransaction(context);
 	auto &glue_catalog = catalog.Cast<GlueCatalog>();
 	auto table_name = info.GetQualifiedName().Name().GetIdentifierName();
 
@@ -676,6 +705,11 @@ void GlueSchemaEntry::Alter(CatalogTransaction transaction, AlterInfo &info) {
 		throw NotImplementedException("Only ALTER TABLE is supported for Glue tables");
 	}
 	auto &alter_table = info.Cast<AlterTableInfo>();
+	if (alter_table.alter_table_type == AlterTableType::SET_TABLE_OPTIONS ||
+	    alter_table.alter_table_type == AlterTableType::RESET_TABLE_OPTIONS) {
+		AlterTableProperties(context, alter_table);
+		return;
+	}
 
 	// Work on the current Glue definition, not the cached one
 	GlueTableInfo current;
@@ -752,7 +786,10 @@ void GlueSchemaEntry::Alter(CatalogTransaction transaction, AlterInfo &info) {
 	}
 	case AlterTableType::ALTER_COLUMN_TYPE: {
 		auto &change = alter_table.Cast<ChangeColumnTypeInfo>();
-		auto &name = change.column_name.GetIdentifierName();
+		if (change.column_path.size() > 1) {
+			throw NotImplementedException("Changing the type of a nested field is not yet supported");
+		}
+		auto &name = change.column_path[0].GetIdentifierName();
 		if (is_partition_key(name)) {
 			throw CatalogException("Column \"%s\" is a partition key of table \"%s\" and its type can not be "
 			                       "changed",
@@ -761,6 +798,12 @@ void GlueSchemaEntry::Alter(CatalogTransaction transaction, AlterInfo &info) {
 		auto column = find_column(columns, name);
 		if (!column) {
 			throw CatalogException("Table \"%s\" does not have a column with name \"%s\"", table_name, name);
+		}
+		// without USING the binder fills in CAST(column AS type)
+		CastExpression plain_cast(change.target_type, make_uniq<ColumnRefExpression>(change.column_path));
+		if (change.expression && !change.expression->Equals(plain_cast)) {
+			throw NotImplementedException("ALTER COLUMN ... TYPE ... USING is not supported for Hive tables in a Glue "
+			                              "catalog: existing data files can not be rewritten");
 		}
 		auto from = GlueTypes::ToLogicalType(column->type);
 		if (!IsAllowedHiveTypeChange(from, change.target_type)) {
@@ -778,20 +821,23 @@ void GlueSchemaEntry::Alter(CatalogTransaction transaction, AlterInfo &info) {
 	}
 
 	GlueAPI::UpdateTableColumns(context, glue_catalog, database_info.name, table_name, columns);
+	RefreshTable(context, table_name);
+}
 
-	// refresh the cached entry from what Glue stored
+GlueTable &GlueSchemaEntry::RefreshTable(ClientContext &context, const string &table_name) {
 	GlueTableInfo updated;
-	if (!GlueAPI::GetTable(context, glue_catalog, database_info.name, table_name, updated)) {
+	if (!GlueAPI::GetTable(context, catalog.Cast<GlueCatalog>(), database_info.name, table_name, updated)) {
 		throw CatalogException("Table \"%s.%s\" was altered but could not be fetched afterwards", database_info.name,
 		                       table_name);
 	}
-	tables.CreateEntry(tables.CreateEntry(updated));
+	return tables.CreateEntry(tables.CreateEntry(updated))->Cast<GlueTable>();
 }
 
 void GlueSchemaEntry::DropEntry(ClientContext &context, DropInfo &info) {
 	if (!CatalogTypeIsSupported(info.type)) {
 		throw NotImplementedException("Glue databases only support dropping tables");
 	}
+	GlueCatalog::ThrowIfInExplicitTransaction(context);
 	auto &glue_catalog = catalog.Cast<GlueCatalog>();
 	auto table_name = info.GetQualifiedName().Name().GetIdentifierName();
 
@@ -841,7 +887,7 @@ optional_ptr<CatalogEntry> GlueSchemaEntry::LookupEntry(CatalogTransaction trans
 		                      entry->name.GetIdentifierName());
 	}
 	if (AsIcebergTable(entry) && lookup_info.GetCatalogType() == CatalogType::TABLE_ENTRY) {
-		CheckNoIcebergTransaction(context, entry->name.GetIdentifierName());
+		GlueCatalog::ThrowIfInExplicitTransaction(context);
 		// The Iceberg catalog plans scans and DML of the table, and DROP / ALTER are bound to it, so they never
 		// reach this table set: the next lookup or listing after this transaction asks Glue again
 		auto table_name = entry->name.GetIdentifierName();

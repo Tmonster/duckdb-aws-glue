@@ -113,6 +113,7 @@ GlueSchemaSet &GlueCatalog::GetSchemas() {
 
 optional_ptr<CatalogEntry> GlueCatalog::CreateSchema(CatalogTransaction transaction, CreateSchemaInfo &info) {
 	auto &context = transaction.GetContext();
+	ThrowIfInExplicitTransaction(context);
 	auto schema_name = info.SchemaName().GetIdentifierName();
 
 	auto existing = schemas.GetEntry(context, schema_name);
@@ -145,6 +146,7 @@ optional_ptr<CatalogEntry> GlueCatalog::CreateSchema(CatalogTransaction transact
 }
 
 void GlueCatalog::DropSchema(ClientContext &context, DropInfo &info) {
+	ThrowIfInExplicitTransaction(context);
 	auto schema_name = info.GetQualifiedName().Name().GetIdentifierName();
 	auto existing = schemas.GetEntry(context, schema_name);
 	if (!existing) {
@@ -194,6 +196,7 @@ void GlueCatalog::SetDatabaseOption(GlueDatabaseInfo &database, const string &ke
 
 void GlueCatalog::AlterSchema(CatalogTransaction transaction, SchemaCatalogEntry &schema, AlterSchemaInfo &info) {
 	auto &context = transaction.GetContext();
+	ThrowIfInExplicitTransaction(context);
 	auto schema_name = schema.Cast<GlueSchemaEntry>().database_info.name;
 	// work on the current Glue definition, not the cached one
 	GlueDatabaseInfo database;
@@ -280,6 +283,14 @@ optional_ptr<SchemaCatalogEntry> GlueCatalog::LookupSchema(CatalogTransaction tr
 	return &entry->Cast<SchemaCatalogEntry>();
 }
 
+void GlueCatalog::ThrowIfInExplicitTransaction(ClientContext &context) {
+	if (!context.transaction.IsAutoCommit()) {
+		throw TransactionException("This connection is currently in a transaction. Transaction support is not "
+		                           "provided for Glue catalogs. Please call COMMIT, ABORT or ROLLBACK before trying "
+		                           "the query again");
+	}
+}
+
 GlueTable &GlueCatalog::GetHiveTableForDML(TableCatalogEntry &table, const char *statement) {
 	auto &glue_table = table.Cast<GlueTable>();
 	if (glue_table.table_info.GetFormat() != GlueTableFormat::HIVE) {
@@ -303,6 +314,7 @@ GlueTable &GlueCatalog::GetHiveTableForDML(TableCatalogEntry &table, const char 
 PhysicalOperator &GlueCatalog::PlanInsert(ClientContext &context, PhysicalPlanGenerator &planner, LogicalInsert &op,
                                           optional_ptr<PhysicalOperator> plan) {
 	auto &glue_table = GetHiveTableForDML(op.table, "INSERT");
+	ThrowIfInExplicitTransaction(context);
 	return GlueHiveInsert::PlanInsert(context, planner, op, glue_table, plan);
 }
 
@@ -317,7 +329,7 @@ PhysicalOperator &GlueCatalog::PlanCreateTableAs(ClientContext &context, Physica
 PhysicalOperator &GlueCatalog::PlanIcebergCreateTableAs(ClientContext &context, PhysicalPlanGenerator &planner,
                                                         LogicalCreateTable &op, PhysicalOperator &plan) {
 	auto &glue_schema = op.schema.Cast<GlueSchemaEntry>();
-	GlueSchemaEntry::CheckNoIcebergTransaction(context, op.info->Base().GetTableName().GetIdentifierName());
+	ThrowIfInExplicitTransaction(context);
 	// CREATE TABLE ... AS on an existing table is planned as a plain CREATE TABLE: this only sees OR REPLACE
 	if (glue_schema.CheckCreateTableConflict(context, op.info->Base())) {
 		throw CatalogException("Table with name \"%s\" already exists in Glue database \"%s\"",

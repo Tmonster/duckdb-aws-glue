@@ -71,11 +71,14 @@ public:
 	//! The CREATE TABLE of an Iceberg table, rebound to the schema of the Iceberg catalog
 	unique_ptr<BoundCreateTableInfo> BindIcebergCreateTable(ClientContext &context, BoundCreateTableInfo &info,
 	                                                        SchemaCatalogEntry &iceberg_schema);
-	//! Iceberg tables are only used in auto-commit statements: Glue itself has no transactions
-	static void CheckNoIcebergTransaction(ClientContext &context, const string &table_name);
+	//! Type changes Hive can read back from the existing parquet files: widening only
+	static bool IsAllowedHiveTypeChange(const LogicalType &from, const LogicalType &to);
+	//! Replace the cached entry of an altered table with what Glue stored
+	GlueTable &RefreshTable(ClientContext &context, const string &table_name);
 
 private:
 	static bool CatalogTypeIsSupported(CatalogType type);
+	void AlterTableProperties(ClientContext &context, AlterTableInfo &alter_table);
 	optional_ptr<CatalogEntry> CreateIcebergTable(ClientContext &context, BoundCreateTableInfo &info);
 	//! The Glue entry of an Iceberg table, or nullptr for any other entry
 	static optional_ptr<GlueTable> AsIcebergTable(optional_ptr<CatalogEntry> entry);

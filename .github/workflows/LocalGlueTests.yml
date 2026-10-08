@@ -1,7 +1,6 @@
 # Runs the sqllogictests against a local Glue (moto) + S3 (MinIO), see scripts/docker-compose.yml and docs/README.md.
 #
-# NOTE: written alongside the local harness and not yet exercised in CI; the build step mirrors `make relassert`
-# (a release build with `make` works the same, adjust the build directory below).
+# A relassert build: DuckDB's assertions and the sanitizers are on, like the build used locally.
 
 name: Local Glue tests
 
@@ -17,7 +16,6 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      VCPKG_TOOLCHAIN_PATH: ${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake
       GEN: ninja
       # the AWS SDK would otherwise ask the EC2 metadata service for a region, which hangs off EC2
       AWS_EC2_METADATA_DISABLED: "true"
@@ -29,6 +27,10 @@ jobs:
         with:
           submodules: recursive
 
+      # the relassert build (debug info + ASAN) and the test data otherwise fill the runner's disk
+      - name: Free disk space
+        uses: ./duckdb/.github/actions/cleanup_runner
+
       - uses: docker/setup-compose-action@v1
 
       - name: Start Glue (moto) and S3 (MinIO)
@@ -37,18 +39,23 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update -y -qq
-          sudo apt-get install -y -qq ninja-build ccache
+          sudo apt-get install -y -qq ninja-build
 
-      - name: Setup vcpkg
-        uses: lukka/run-vcpkg@v11
+      - name: Setup Ccache
+        uses: ./duckdb/.github/actions/ccache-action
         with:
-          vcpkgGitCommitId: cd61e1e26a038e82d6550a3ebbe0fbbfe7da78e3 # Release 2026.06.2
+          # PR caches are only visible to the PR itself; at this size they would evict main's from the 10 GB budget
+          save: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build
-        run: make release
+        uses: duckdb/duckdb-ci/build-duckdb@main
+        with:
+          build-type: relassert
+          build: make relassert
+          vcpkg-commit: cd61e1e26a038e82d6550a3ebbe0fbbfe7da78e3 # Release 2026.06.2
 
       - name: Run tests
-        run: ./build/release/test/unittest --test-config test/configs/local_glue.json 'test/sql/*'
+        run: make test-local TEST_BUILD=relassert
 
       - name: Server logs
         if: always()

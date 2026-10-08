@@ -37,7 +37,11 @@ SQLLogicTests under `test/sql/`. They need a `--test-config` that sets `GLUE_CAT
 `DEFAULT_S3_LOCATION` and creates the S3 secret; without one every test is skipped (`require-env GLUE_CATALOG_ID`).
 
 - `test/configs/local_glue.json`: moto (Glue, port 5555) + SeaweedFS (S3, port 9100) from `scripts/docker-compose.yml`.
-  `make glue-fixture` / `make glue-fixture-down`; `make test-local` runs everything.
+  `make glue-fixture` / `make glue-fixture-down`; `make test-local` runs everything through DuckDB's
+  `scripts/ci/run_tests.py` (Python 3.10+, `PYTHON=...`), serially, retrying a failing test twice: against the local
+  servers a read right after a write occasionally comes back empty.
+- `.github/workflows/CloudGlueTests.yml`: maintainer-only `workflow_dispatch` (input `pr_number`) running all tests
+  of a PR against the account configured in the `cloud-glue` environment (`make test-cloud CLOUD_TEST_CONFIG=...`).
 - `test/configs/cloud_glue.json`: live AWS (credential chain, eu-north-1). `test/sql/cloud/` only runs here
   (`require-env GLUE_TEST_CONFIG cloud`) and reads pre-existing tables in the account.
 
@@ -60,9 +64,10 @@ AWS_EC2_METADATA_DISABLED=true ASAN_OPTIONS=detect_container_overflow=0 \
   Validate config edits with `jq empty test/configs/*.json`.
 - Test targets don't build first: rebuild before running tests.
 
-Iceberg tests (`test/sql/iceberg/`, `test/sql/combined_table_types/`) only run against the cloud config (moto has
-no Iceberg REST endpoint) and start with `set ignore_error_messages`, so REST errors (which mention `HTTP`) fail the
-test instead of skipping it.
+Tests that need Iceberg tables (`test/sql/iceberg/`, `test/sql/combined_table_types/`) have
+`require-env ICEBERG_SUPPORTED`, which only the cloud config sets (moto has no Iceberg REST endpoint), and
+`set ignore_error_messages`, so REST errors (which mention `HTTP`) fail the test instead of skipping it. New tests
+that create or read Iceberg tables need both.
 
 Test format is DuckDB's sqllogictest (`statement ok|error`, `query I...`, `----`, `<REGEX>:` for error patterns,
 `require-env`). Slow tests use `.test_slow`. Do not add `PRAGMA enable_verification`. Test error paths, not just the
