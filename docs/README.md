@@ -78,7 +78,8 @@ their codec themselves.
   (JsonSerDe, one object per line) or avro (AvroSerDe)
   Hive table at `location`, else `<DEFAULT_LOCATION>/<database>/<table>`, else `<database LocationUri>/<table>`;
   without any of these the statement fails. Partition keys must be plain column names; they become Glue
-  PartitionKeys and are listed last in the table's columns. Unknown `WITH` keys are stored as Glue table parameters.
+  PartitionKeys and are listed last in the table's columns. Column defaults are refused. Unknown `WITH` keys are stored
+  as Glue table parameters.
   For csv, `delimiter = '|'` sets the field delimiter (`field.delim`), `header = true` makes every file start with a
   header line (`skip.header.line.count`), and `quote = '"'` / `escape = '\'` switch the table to OpenCSVSerde with
   `separatorChar` / `quoteChar` / `escapeChar` (the escape character defaults to the quote character).
