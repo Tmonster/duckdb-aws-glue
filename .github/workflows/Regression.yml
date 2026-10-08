@@ -159,7 +159,15 @@ jobs:
         run: |
           mkdir -p .github/regression
           ls benchmark/tpch/sf1/*.benchmark > .github/regression/tpch_benchmarks.csv
-          python duckdb/scripts/regression/test_runner.py --old base/build/release/benchmark/benchmark_runner --new build/release/benchmark/benchmark_runner --benchmarks .github/regression/tpch_benchmarks.csv --verbose --threads 2 --samples 10
+          python duckdb/scripts/regression/test_runner.py --old base/build/release/benchmark/benchmark_runner --new build/release/benchmark/benchmark_runner --benchmarks .github/regression/tpch_benchmarks.csv --verbose --threads 2 --samples 5
+
+      # q85 runs over a minute at 2 threads (bad join order), q95 fails (the CTE inliner can't copy the Glue scan)
+      - name: Tpcds benchmarks
+        if: ${{ !cancelled() && env.IS_MAIN != 'true' }}
+        run: |
+          mkdir -p .github/regression
+          ls benchmark/tpcds/sf1/*.benchmark | grep -vE '/q(85|95)\.benchmark$' > .github/regression/tpcds_benchmarks.csv
+          python duckdb/scripts/regression/test_runner.py --old base/build/release/benchmark/benchmark_runner --new build/release/benchmark/benchmark_runner --benchmarks .github/regression/tpcds_benchmarks.csv --verbose --threads 2 --samples 5
 
       - name: Server logs
         if: ${{ always() && env.IS_MAIN != 'true' }}

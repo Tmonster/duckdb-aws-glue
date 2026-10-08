@@ -3,9 +3,12 @@
 # group: [sf1]
 
 # TPC-DS SF1 generated locally with dsdgen and written to Hive tables in the local Glue (moto) + S3 (MinIO) with CTAS.
-# The fact tables are partitioned by their date key (as hive-testbench and spark-sql-perf do), the dimension tables
-# are unpartitioned. The local tables are dropped after the load, so the queries read the Glue tables; the cache only
-# keeps a marker table. The load skips tables that already exist in Glue: rebuild the fixture to change the data.
+# The fact tables are partitioned by 10-day buckets of their date key (ss_sold_date_bucket, ...; the date keys are
+# Julian days, so (date_sk - 2440588) // 10 is the bucket of the TPC-H tables), the dimension tables are unpartitioned.
+# A partition per day makes moto's GetPartitions dominate the timings. The queries in benchmark/tpcds/queries are
+# DuckDB's with bucket filters added next to the date filters. The local tables are dropped after the load, so the
+# queries read the Glue tables; the cache only keeps a marker table. The load skips tables that already exist in Glue:
+# rebuild the fixture to change the data.
 #
 # The load needs a build without assertions (make release): the fact tables have rows with a NULL date key, and
 # writing a partition with a NULL value more than one batch at a time trips a D_ASSERT in DuckDB's partitioned copy
@@ -41,13 +44,13 @@ ATTACH '123456789012' AS my_datalake (
     DEFAULT_LOCATION 's3://glue-test/warehouse/benchmark'
 );
 CREATE SCHEMA IF NOT EXISTS my_datalake.bench_tpcds_sf1;
-CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1.store_sales PARTITIONED BY (ss_sold_date_sk) AS SELECT * FROM store_sales;
-CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1.store_returns PARTITIONED BY (sr_returned_date_sk) AS SELECT * FROM store_returns;
-CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1.catalog_sales PARTITIONED BY (cs_sold_date_sk) AS SELECT * FROM catalog_sales;
-CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1.catalog_returns PARTITIONED BY (cr_returned_date_sk) AS SELECT * FROM catalog_returns;
-CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1.web_sales PARTITIONED BY (ws_sold_date_sk) AS SELECT * FROM web_sales;
-CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1.web_returns PARTITIONED BY (wr_returned_date_sk) AS SELECT * FROM web_returns;
-CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1.inventory PARTITIONED BY (inv_date_sk) AS SELECT * FROM inventory;
+CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1.store_sales PARTITIONED BY (ss_sold_date_bucket) AS SELECT *, (ss_sold_date_sk - 2440588) // 10 AS ss_sold_date_bucket FROM store_sales;
+CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1.store_returns PARTITIONED BY (sr_returned_date_bucket) AS SELECT *, (sr_returned_date_sk - 2440588) // 10 AS sr_returned_date_bucket FROM store_returns;
+CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1.catalog_sales PARTITIONED BY (cs_sold_date_bucket) AS SELECT *, (cs_sold_date_sk - 2440588) // 10 AS cs_sold_date_bucket FROM catalog_sales;
+CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1.catalog_returns PARTITIONED BY (cr_returned_date_bucket) AS SELECT *, (cr_returned_date_sk - 2440588) // 10 AS cr_returned_date_bucket FROM catalog_returns;
+CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1.web_sales PARTITIONED BY (ws_sold_date_bucket) AS SELECT *, (ws_sold_date_sk - 2440588) // 10 AS ws_sold_date_bucket FROM web_sales;
+CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1.web_returns PARTITIONED BY (wr_returned_date_bucket) AS SELECT *, (wr_returned_date_sk - 2440588) // 10 AS wr_returned_date_bucket FROM web_returns;
+CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1.inventory PARTITIONED BY (inv_date_bucket) AS SELECT *, (inv_date_sk - 2440588) // 10 AS inv_date_bucket FROM inventory;
 CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1.call_center AS SELECT * FROM call_center;
 CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1.catalog_page AS SELECT * FROM catalog_page;
 CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1.customer AS SELECT * FROM customer;
@@ -115,6 +118,6 @@ name DSQ${QUERY_NUMBER_PADDED}
 group tpcds_glue
 subgroup sf1
 
-run duckdb/extension/tpcds/dsdgen/queries/${QUERY_NUMBER_PADDED}.sql
+run benchmark/tpcds/queries/${QUERY_NUMBER_PADDED}.sql
 
 result duckdb/extension/tpcds/dsdgen/answers/sf1/${QUERY_NUMBER_PADDED}.csv
