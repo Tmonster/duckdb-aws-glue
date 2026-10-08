@@ -321,7 +321,8 @@ against the local servers a read right after a write occasionally comes back wit
 the output. `TEST_BUILD=release` runs the `release` build instead of
 `relassert`.
 
-A maintainer can run the whole suite of a pull request against a live catalog with the `Cloud Glue tests` workflow
+A maintainer can run the whole suite of a pull request, on a release build, against a live catalog with the
+`Cloud Glue tests` workflow
 (`.github/workflows/CloudGlueTests.yml`, `gh workflow run CloudGlueTests.yml -f pr_number=<n>`). It is never
 triggered by a PR, refuses to run for anyone below the `maintain` role, tests the PR's head commit as it was when the
 run started, and reports the result as a `Cloud Glue tests` status on that commit. The catalog, region, S3 prefix and

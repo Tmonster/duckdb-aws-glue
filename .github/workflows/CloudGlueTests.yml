@@ -1,7 +1,7 @@
-# Runs all sqllogictests of a pull request against a live AWS Glue Data Catalog (test/configs/cloud_glue.json), for a
-# maintainer who suspects a PR breaks the cloud tests. It is never triggered by a PR: a maintainer starts it from the
-# Actions tab (or `gh workflow run CloudGlueTests.yml -f pr_number=123`) after reading the PR, because it runs the PR's
-# code with the AWS credentials of the 'cloud-glue' environment.
+# Runs all sqllogictests of a pull request, on a release build, against a live AWS Glue Data Catalog
+# (test/configs/cloud_glue.json), for a maintainer who suspects a PR breaks the cloud tests. It is never triggered by
+# a PR: a maintainer starts it from the Actions tab (or `gh workflow run CloudGlueTests.yml -f pr_number=123`) after
+# reading the PR, because it runs the PR's code with the AWS credentials of the 'cloud-glue' environment.
 #
 # The 'cloud-glue' environment provides:
 #   variables  GLUE_CATALOG_ID       the AWS account id of the Glue Data Catalog
@@ -98,7 +98,7 @@ jobs:
           submodules: recursive
           persist-credentials: false
 
-      # the relassert build (debug info + ASAN) otherwise fills the runner's disk
+      # the build and its vcpkg dependencies otherwise fill the runner's disk
       - name: Free disk space
         uses: ./duckdb/.github/actions/cleanup_runner
 
@@ -115,8 +115,8 @@ jobs:
       - name: Build
         uses: duckdb/duckdb-ci/build-duckdb@main
         with:
-          build-type: relassert
-          build: make relassert
+          build-type: release
+          build: python3 duckdb/scripts/ci/retry.py -- make release
           vcpkg-commit: cd61e1e26a038e82d6550a3ebbe0fbbfe7da78e3 # Release 2026.06.2
 
       - name: AWS credentials
@@ -145,7 +145,7 @@ jobs:
           DEFAULT_S3_LOCATION: ${{ vars.DEFAULT_S3_LOCATION }}
 
       - name: Run tests
-        run: make test-cloud TEST_BUILD=relassert CLOUD_TEST_CONFIG="$RUNNER_TEMP/cloud_glue_ci.json"
+        run: make test-cloud TEST_BUILD=release CLOUD_TEST_CONFIG="$RUNNER_TEMP/cloud_glue_ci.json"
 
       - name: Report the result on the commit
         if: always() && steps.pr.outputs.sha != ''
