@@ -82,9 +82,10 @@ jobs:
         run: make release
 
       # unittest finds libduckdb.so through an absolute RUNPATH, so it is unpacked at the same path; tar keeps the
-      # executable bits that upload-artifact drops
+      # executable bits that upload-artifact drops. The test runner installs extensions it can not load statically from
+      # build/release/repository
       - name: Pack unittest
-        run: tar -cf unittest.tar build/release/test/unittest build/release/src/libduckdb.so
+        run: tar -cf unittest.tar build/release/test/unittest build/release/src/libduckdb.so build/release/repository
 
       - uses: actions/upload-artifact@v4
         with:
@@ -113,8 +114,12 @@ jobs:
 
       - uses: docker/setup-compose-action@v1
 
+      # --wait counts the one-shot init container as ready once it runs, docker wait blocks until it has created the
+      # bucket and the Glue fixtures
       - name: Start Glue (moto) and S3 (SeaweedFS)
-        run: docker compose -f scripts/docker-compose.yml up -d --wait
+        run: |
+          docker compose -f scripts/docker-compose.yml up -d --wait
+          docker wait glue-init
 
       - uses: actions/download-artifact@v4
         with:
@@ -122,6 +127,10 @@ jobs:
 
       - name: Unpack unittest
         run: tar -xf unittest.tar
+
+      # run_tests.py does not show why a test fails to start, a single unittest run does
+      - name: Run a single duckdb/duckdb test
+        run: ./build/release/test/unittest --test-dir duckdb --test-config test/configs/local_glue_duckdb_tests.json test/sql/cast/union_cast.test || true
 
       - name: Run duckdb/duckdb tests
         run: make test-duckdb-local TEST_BUILD=release TEST_SHARDS=${{ strategy.job-total }} TEST_SHARD=${{ strategy.job-index }}

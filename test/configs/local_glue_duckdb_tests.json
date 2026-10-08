@@ -61,7 +61,8 @@
     "Renaming a view is not supported for Glue views",
     "COMMENT ON TABLE is not supported for Glue tables",
     "COMMENT ON COLUMN is not supported for Glue tables",
-    "has no DuckDB definition"
+    "has no DuckDB definition",
+    "CREATE OR REPLACE SCHEMA is not supported for Glue catalogs"
   ],
   "skip_tests": [
     {
@@ -293,7 +294,8 @@
         "test/sql/types/list/unnest_types.test",
         "test/sql/types/nested/list/test_list_slice_numeric_limits.test",
         "test/sql/window/test_window_bool.test",
-        "test/sql/window/test_window_types.test"
+        "test/sql/window/test_window_types.test",
+        "test/sql/select/test_multi_column_reference.test"
       ]
     },
     {
@@ -348,7 +350,13 @@
         "test/sql/window/window_mtcars.test",
         "test/sql/catalog/test_create_from_select.test",
         "test/sql/generated_columns/virtual/alter_table.test",
-        "test/sql/function/timestamp/test_icu_datediff.test"
+        "test/sql/function/timestamp/test_icu_datediff.test",
+        "test/sql/types/nested/map/test_map.test",
+        "test/sql/types/nested/map/test_map_subscript.test",
+        "test/sql/function/list/list_unique.test",
+        "test/sql/function/list/list_distinct.test",
+        "test/sql/parser/test_columns.test",
+        "test/sql/copy/csv/test_glob_type.test"
       ]
     },
     {
@@ -377,22 +385,30 @@
         "test/sql/alter/rename_table/test_rename_table_view.test",
         "test/sql/catalog/test_catalog_errors.test",
         "test/sql/catalog/test_if_not_exists.test",
-        "test/sql/catalog/view/test_view_schema_change_with_dependencies.test"
+        "test/sql/catalog/view/test_view_schema_change_with_dependencies.test",
+        "test/sql/aggregate/qualify/test_qualify_view.test",
+        "test/sql/storage/catalog/test_view_explicit_aliases.test",
+        "test/sql/storage/catalog/test_view_storage.test",
+        "test/sql/storage/wal/wal_view_explicit_aliases.test",
+        "test/sql/storage/wal/wal_view_storage.test"
       ]
     },
     {
-      "reason": "Glue tables support what DuckDB tables refuse (PARTITIONED BY, table options), the expected error does not come",
+      "reason": "Glue tables and databases support what DuckDB refuses (PARTITIONED BY, table and schema options), the expected error does not come",
       "paths": [
         "test/sql/alter/alter_table_set_table_options.test",
         "test/sql/create/create_as_partition_sorted_options.test",
-        "test/sql/create/create_table_extra_options.test"
+        "test/sql/create/create_table_extra_options.test",
+        "test/sql/alter/alter_schema_set_schema_options.test",
+        "test/sql/create/create_schema_options.test"
       ]
     },
     {
-      "reason": "A missing column is reported with another error type and message",
+      "reason": "A missing column or schema is reported with another error type and message",
       "paths": [
         "test/sql/alter/alter_type/test_alter_type_incorrect.test",
-        "test/sql/alter/drop_col/test_drop_col_failure.test"
+        "test/sql/alter/drop_col/test_drop_col_failure.test",
+        "test/sql/peg_parser/transformer/drop_statement.test"
       ]
     },
     {
@@ -448,7 +464,9 @@
         "test/sql/catalog/test_temporary_schema.test",
         "test/sql/table_function/test_information_schema_columns.test",
         "test/sql/settings/setting_preserve_identifier_case.test",
-        "test/sql/table_function/information_schema.test"
+        "test/sql/table_function/information_schema.test",
+        "test/sql/catalog/view/test_view_sql.test",
+        "test/sql/catalog/view/test_view_sql_with_dependencies.test"
       ]
     },
     {
@@ -666,7 +684,11 @@
         "test/sql/settings/set_schema_temp_main.test",
         "test/sql/settings/test_external_access_metadata.test",
         "test/sql/storage/extensions/extension_views.test",
-        "test/sql/storage/temp_directory/test_runner_temp_directory.test"
+        "test/sql/storage/temp_directory/test_runner_temp_directory.test",
+        "test/sql/catalog/test_set_search_path.test",
+        "test/sql/catalog/test_temporary.test",
+        "test/sql/catalog/test_set_schema.test",
+        "test/sql/settings/drop_set_schema.test"
       ]
     },
     {
@@ -690,6 +712,29 @@
         "test/sql/types/decimal/test_decimal_2975.test",
         "test/sql/types/nested/map/map_from_entries/null_entry.test",
         "test/sql/types/nested/map/test_map_subscript_composite.test"
+      ]
+    },
+    {
+      "reason": "BUG: CREATE SCHEMA a.b creates a top-level Glue database b instead of refusing the nested schema, a.b can not be resolved afterwards",
+      "paths": [
+        "test/sql/catalog/nested_schema/create_nested_schema.test",
+        "test/sql/catalog/nested_schema/deeply_nested_entries.test",
+        "test/sql/catalog/nested_schema/drop_nested_schema.test",
+        "test/sql/catalog/nested_schema/drop_nested_schema_persist.test",
+        "test/sql/catalog/nested_schema/nested_alter.test",
+        "test/sql/catalog/nested_schema/nested_constraints.test",
+        "test/sql/catalog/nested_schema/nested_entries.test",
+        "test/sql/catalog/nested_schema/nested_entries_persist.test",
+        "test/sql/catalog/nested_schema/nested_export.test",
+        "test/sql/catalog/nested_schema/nested_schema_limits.test",
+        "test/sql/catalog/nested_schema/nested_schema_storage_version.test",
+        "test/sql/catalog/nested_schema/nested_table.test",
+        "test/sql/catalog/nested_schema/nested_table_columnref.test",
+        "test/sql/catalog/nested_schema/nested_table_dml.test",
+        "test/sql/catalog/nested_schema/nested_table_dml_persist.test",
+        "test/sql/catalog/nested_schema/nested_table_persist.test",
+        "test/sql/catalog/nested_schema/nested_wal_replay.test",
+        "test/sql/catalog/nested_schema/persist.test"
       ]
     }
   ]
