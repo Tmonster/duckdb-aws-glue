@@ -326,6 +326,11 @@ that takes `FORMAT`, `SF` and `SF_NAME`. The TPC-DS load needs a build without a
 a `D_ASSERT` in DuckDB's partitioned copy (see the header of `benchmark/tpcds/tpcds.benchmark.in` for a repro without
 Glue).
 
+`benchmark/{tpch,tpcds}/sf10/parquet/` run the same queries at SF10 (the TPC-DS load writes ~4 GB to S3), and
+`benchmark/{tpch,tpcds}/sf0.01/parquet/` at SF0.01, which has as many partitions and files as SF1 but almost no rows,
+so its timings are mostly the Glue calls, the S3 listings and the file opens. Neither runs in CI. (TPC-H q17 fails at
+SF0.01: DuckDB's answer file for it is empty, the query returns one NULL.)
+
 Both loads create their Glue tables with `CREATE TABLE IF NOT EXISTS ... AS`, so changing a load has no effect while
 the tables are in Glue: rebuild the fixture with `make glue-fixture-down && make glue-fixture` first.
 
