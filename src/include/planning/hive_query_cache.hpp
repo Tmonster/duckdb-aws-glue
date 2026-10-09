@@ -8,6 +8,7 @@
 #include "core/glue_info.hpp"
 
 namespace duckdb {
+struct HiveScanInfo;
 struct HiveTableSample;
 
 //! What Glue said about a table the running query scans
@@ -33,10 +34,12 @@ struct HiveTableSampleEntry {
 class HiveQueryCache : public ClientContextState {
 public:
 	static shared_ptr<HiveQueryCache> Get(ClientContext &context);
+	//! The key of a Glue table in GetGlueTable
+	static string TableKey(const string &catalog, const string &database, const string &table);
 
 	void QueryEnd(ClientContext &context) override;
 
-	//! 'key' identifies the table: its catalog, database and name
+	//! 'key' identifies the table (TableKey)
 	shared_ptr<GlueTableEntry> GetGlueTable(const string &key);
 	//! 'table' identifies the table: its catalog and name, or the location of a hive_scan
 	shared_ptr<HiveTableSampleEntry> GetSample(const string &table);
@@ -49,5 +52,8 @@ private:
 	unordered_map<string, shared_ptr<HiveTableSampleEntry>> samples DUCKDB_GUARDED_BY(lock);
 	unordered_map<string, shared_ptr<MultiFileList>> directory_listings DUCKDB_GUARDED_BY(lock);
 };
+
+//! The partitions Glue registers for the table of 'info' in this query, fetched once for every scan of the table
+shared_ptr<const vector<GluePartitionInfo>> GetTablePartitions(ClientContext &context, const HiveScanInfo &info);
 
 } // namespace duckdb

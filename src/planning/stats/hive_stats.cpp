@@ -11,6 +11,8 @@
 #include "duckdb/common/unordered_map.hpp"
 #include "duckdb/logging/logger.hpp"
 #include "duckdb/storage/statistics/base_statistics.hpp"
+#include "api/glue_api.hpp"
+#include "catalog/glue_catalog.hpp"
 #include "core/glue_types.hpp"
 #include "planning/hive_multi_file_reader.hpp"
 #include "planning/hive_query_cache.hpp"
@@ -274,7 +276,7 @@ unique_ptr<NodeStatistics> HiveScanCardinality(ClientContext &context, const Fun
 	auto &hive_list = bind_data.file_list->Cast<HiveMultiFileList>();
 	auto &info = hive_list.ScanInfo();
 	// pruning has already happened by the time the cardinality is asked for, so these are the partitions read
-	auto partitions = info.partition_keys.empty() ? idx_t(1) : hive_list.PartitionIndexes().size();
+	auto partitions = info.partition_keys.empty() ? idx_t(1) : hive_list.PartitionIndexes()->size();
 	if (partitions == 0) {
 		return make_uniq<NodeStatistics>(0);
 	}
@@ -300,7 +302,7 @@ unique_ptr<NodeStatistics> HiveScanCardinality(ClientContext &context, const Fun
 		auto average_bytes = bytes / seen;
 		files = 0;
 		bytes = 0;
-		for (auto partition_index : hive_list.PartitionIndexes()) {
+		for (auto partition_index : *hive_list.PartitionIndexes()) {
 			auto entry = sample.partition_sizes.find(partition_index);
 			if (entry == sample.partition_sizes.end()) {
 				files += average_files;
@@ -387,15 +389,16 @@ unique_ptr<BaseStatistics> HivePartitionStatistics(ClientContext &context, Table
 	}
 
 	// the partitions left after pruning: filter pushdown runs before statistics are asked for
-	auto &partition_indexes = hive_list.PartitionIndexes();
-	if (partition_indexes.empty()) {
+	auto partition_indexes = hive_list.PartitionIndexes();
+	if (partition_indexes->empty()) {
 		return nullptr;
 	}
 	auto &type = bind_data.columns[input.column_index.GetPrimaryIndex()].type;
 	unique_ptr<BaseStatistics> result;
 	value_set_t distinct_values;
-	for (auto partition_index : partition_indexes) {
-		auto &partition = info.partitions[partition_index];
+	auto partitions = info.Partitions(context);
+	for (auto partition_index : *partition_indexes) {
+		auto &partition = (*partitions)[partition_index];
 		if (key_index >= partition.values.size()) {
 			// Glue registered the partition with fewer values than the table has keys
 			return nullptr;
