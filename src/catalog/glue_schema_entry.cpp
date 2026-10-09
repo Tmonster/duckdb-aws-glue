@@ -336,7 +336,7 @@ static void CheckEntryType(optional_ptr<CatalogEntry> existing, CatalogType expe
 }
 
 optional_ptr<CatalogEntry> GlueSchemaEntry::CheckCreateTableConflict(ClientContext &context,
-                                                                      const CreateTableInfo &create_info) {
+                                                                     const CreateTableInfo &create_info) {
 	auto table_name = create_info.GetTableName().GetIdentifierName();
 	EntryLookupInfo lookup(CatalogType::TABLE_ENTRY, QualifiedName(Identifier(table_name)));
 	auto existing = tables.GetEntry(context, lookup);
@@ -395,8 +395,8 @@ optional_ptr<CatalogEntry> GlueSchemaEntry::CreateIcebergTable(ClientContext &co
 	auto &iceberg_schema = catalog.Cast<GlueCatalog>().GetIcebergSchema(context, database_info.name);
 	auto iceberg_info = BindIcebergCreateTable(context, info, iceberg_schema);
 	auto entry = iceberg_schema.CreateTable(iceberg_schema.catalog.GetCatalogTransaction(context), *iceberg_info);
-	GlueTransaction::Get(context, catalog).AddIcebergTable(database_info.name,
-	                                                       info.Base().GetTableName().GetIdentifierName());
+	GlueTransaction::Get(context, catalog)
+	    .AddIcebergTable(database_info.name, info.Base().GetTableName().GetIdentifierName());
 	return entry;
 }
 
