@@ -1,0 +1,8 @@
+# name: benchmark/tpcds/sf1/json/q27.benchmark
+# description: Run query 27 from the TPC-DS benchmark on json Hive tables in the local Glue
+# group: [json]
+
+template benchmark/tpcds/sf1/tpcds_sf1.benchmark.in
+QUERY_NUMBER=27
+QUERY_NUMBER_PADDED=27
+FORMAT=json

@@ -19,13 +19,17 @@
 
 require parquet
 
+require json
+
+require avro
+
 require httpfs
 
 require glue
 
 require tpcds
 
-cache glue_tpcds_sf1.duckdb
+cache glue_tpcds_sf1_${FORMAT}.duckdb
 
 load
 CALL dsdgen(sf=1);
@@ -43,31 +47,31 @@ ATTACH '123456789012' AS my_datalake (
     ENDPOINT 'http://localhost:5555',
     DEFAULT_LOCATION 's3://glue-test/warehouse/benchmark'
 );
-CREATE SCHEMA IF NOT EXISTS my_datalake.bench_tpcds_sf1;
-CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1.store_sales PARTITIONED BY (ss_sold_date_bucket) AS SELECT *, (ss_sold_date_sk - 2440588) // 10 AS ss_sold_date_bucket FROM store_sales;
-CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1.store_returns PARTITIONED BY (sr_returned_date_bucket) AS SELECT *, (sr_returned_date_sk - 2440588) // 10 AS sr_returned_date_bucket FROM store_returns;
-CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1.catalog_sales PARTITIONED BY (cs_sold_date_bucket) AS SELECT *, (cs_sold_date_sk - 2440588) // 10 AS cs_sold_date_bucket FROM catalog_sales;
-CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1.catalog_returns PARTITIONED BY (cr_returned_date_bucket) AS SELECT *, (cr_returned_date_sk - 2440588) // 10 AS cr_returned_date_bucket FROM catalog_returns;
-CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1.web_sales PARTITIONED BY (ws_sold_date_bucket) AS SELECT *, (ws_sold_date_sk - 2440588) // 10 AS ws_sold_date_bucket FROM web_sales;
-CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1.web_returns PARTITIONED BY (wr_returned_date_bucket) AS SELECT *, (wr_returned_date_sk - 2440588) // 10 AS wr_returned_date_bucket FROM web_returns;
-CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1.inventory PARTITIONED BY (inv_date_bucket) AS SELECT *, (inv_date_sk - 2440588) // 10 AS inv_date_bucket FROM inventory;
-CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1.call_center AS SELECT * FROM call_center;
-CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1.catalog_page AS SELECT * FROM catalog_page;
-CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1.customer AS SELECT * FROM customer;
-CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1.customer_address AS SELECT * FROM customer_address;
-CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1.customer_demographics AS SELECT * FROM customer_demographics;
-CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1.date_dim AS SELECT * FROM date_dim;
-CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1.household_demographics AS SELECT * FROM household_demographics;
-CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1.income_band AS SELECT * FROM income_band;
-CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1.item AS SELECT * FROM item;
-CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1.promotion AS SELECT * FROM promotion;
-CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1.reason AS SELECT * FROM reason;
-CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1.ship_mode AS SELECT * FROM ship_mode;
-CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1.store AS SELECT * FROM store;
-CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1.time_dim AS SELECT * FROM time_dim;
-CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1.warehouse AS SELECT * FROM warehouse;
-CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1.web_page AS SELECT * FROM web_page;
-CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1.web_site AS SELECT * FROM web_site;
+CREATE SCHEMA IF NOT EXISTS my_datalake.bench_tpcds_sf1_${FORMAT};
+CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1_${FORMAT}.store_sales PARTITIONED BY (ss_sold_date_bucket) WITH (format = '${FORMAT}') AS SELECT *, (ss_sold_date_sk - 2440588) // 10 AS ss_sold_date_bucket FROM store_sales;
+CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1_${FORMAT}.store_returns PARTITIONED BY (sr_returned_date_bucket) WITH (format = '${FORMAT}') AS SELECT *, (sr_returned_date_sk - 2440588) // 10 AS sr_returned_date_bucket FROM store_returns;
+CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1_${FORMAT}.catalog_sales PARTITIONED BY (cs_sold_date_bucket) WITH (format = '${FORMAT}') AS SELECT *, (cs_sold_date_sk - 2440588) // 10 AS cs_sold_date_bucket FROM catalog_sales;
+CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1_${FORMAT}.catalog_returns PARTITIONED BY (cr_returned_date_bucket) WITH (format = '${FORMAT}') AS SELECT *, (cr_returned_date_sk - 2440588) // 10 AS cr_returned_date_bucket FROM catalog_returns;
+CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1_${FORMAT}.web_sales PARTITIONED BY (ws_sold_date_bucket) WITH (format = '${FORMAT}') AS SELECT *, (ws_sold_date_sk - 2440588) // 10 AS ws_sold_date_bucket FROM web_sales;
+CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1_${FORMAT}.web_returns PARTITIONED BY (wr_returned_date_bucket) WITH (format = '${FORMAT}') AS SELECT *, (wr_returned_date_sk - 2440588) // 10 AS wr_returned_date_bucket FROM web_returns;
+CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1_${FORMAT}.inventory PARTITIONED BY (inv_date_bucket) WITH (format = '${FORMAT}') AS SELECT *, (inv_date_sk - 2440588) // 10 AS inv_date_bucket FROM inventory;
+CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1_${FORMAT}.call_center WITH (format = '${FORMAT}') AS SELECT * FROM call_center;
+CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1_${FORMAT}.catalog_page WITH (format = '${FORMAT}') AS SELECT * FROM catalog_page;
+CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1_${FORMAT}.customer WITH (format = '${FORMAT}') AS SELECT * FROM customer;
+CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1_${FORMAT}.customer_address WITH (format = '${FORMAT}') AS SELECT * FROM customer_address;
+CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1_${FORMAT}.customer_demographics WITH (format = '${FORMAT}') AS SELECT * FROM customer_demographics;
+CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1_${FORMAT}.date_dim WITH (format = '${FORMAT}') AS SELECT * FROM date_dim;
+CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1_${FORMAT}.household_demographics WITH (format = '${FORMAT}') AS SELECT * FROM household_demographics;
+CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1_${FORMAT}.income_band WITH (format = '${FORMAT}') AS SELECT * FROM income_band;
+CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1_${FORMAT}.item WITH (format = '${FORMAT}') AS SELECT * FROM item;
+CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1_${FORMAT}.promotion WITH (format = '${FORMAT}') AS SELECT * FROM promotion;
+CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1_${FORMAT}.reason WITH (format = '${FORMAT}') AS SELECT * FROM reason;
+CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1_${FORMAT}.ship_mode WITH (format = '${FORMAT}') AS SELECT * FROM ship_mode;
+CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1_${FORMAT}.store WITH (format = '${FORMAT}') AS SELECT * FROM store;
+CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1_${FORMAT}.time_dim WITH (format = '${FORMAT}') AS SELECT * FROM time_dim;
+CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1_${FORMAT}.warehouse WITH (format = '${FORMAT}') AS SELECT * FROM warehouse;
+CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1_${FORMAT}.web_page WITH (format = '${FORMAT}') AS SELECT * FROM web_page;
+CREATE TABLE IF NOT EXISTS my_datalake.bench_tpcds_sf1_${FORMAT}.web_site WITH (format = '${FORMAT}') AS SELECT * FROM web_site;
 DROP TABLE store_sales;
 DROP TABLE store_returns;
 DROP TABLE catalog_sales;
@@ -92,8 +96,8 @@ DROP TABLE time_dim;
 DROP TABLE warehouse;
 DROP TABLE web_page;
 DROP TABLE web_site;
-CREATE TABLE glue_tpcds_sf1_loaded AS SELECT 1 AS loaded;
-USE my_datalake.bench_tpcds_sf1;
+CREATE TABLE glue_tpcds_sf1_${FORMAT}_loaded AS SELECT 1 AS loaded;
+USE my_datalake.bench_tpcds_sf1_${FORMAT};
 SET enable_external_file_cache=false;
 
 reload
@@ -111,12 +115,12 @@ ATTACH '123456789012' AS my_datalake (
     ENDPOINT 'http://localhost:5555',
     DEFAULT_LOCATION 's3://glue-test/warehouse/benchmark'
 );
-USE my_datalake.bench_tpcds_sf1;
+USE my_datalake.bench_tpcds_sf1_${FORMAT};
 SET enable_external_file_cache=false;
 
-name DSQ${QUERY_NUMBER_PADDED}
+name DSQ${QUERY_NUMBER_PADDED}_${FORMAT}
 group tpcds_glue
-subgroup sf1
+subgroup sf1_${FORMAT}
 
 run benchmark/tpcds/queries/${QUERY_NUMBER_PADDED}.sql
 

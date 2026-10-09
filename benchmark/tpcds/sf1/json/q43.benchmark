@@ -1,0 +1,8 @@
+# name: benchmark/tpcds/sf1/json/q43.benchmark
+# description: Run query 43 from the TPC-DS benchmark on json Hive tables in the local Glue
+# group: [json]
+
+template benchmark/tpcds/sf1/tpcds_sf1.benchmark.in
+QUERY_NUMBER=43
+QUERY_NUMBER_PADDED=43
+FORMAT=json
