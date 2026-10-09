@@ -349,9 +349,9 @@ TPC-H and TPC-DS benchmarks on native tables, the reference for these, run with
 `.github/workflows/Regression.yml` builds the benchmark runner for a PR and for its merge base once, then compares
 their timings (5 runs each) in a job per format: the TPC-H and TPC-DS benchmarks of that format, plus
 `benchmark/*.benchmark`, `benchmark/pushdown/` and `benchmark/optimizer/` in the parquet job. To keep the jobs short it
-skips the queries that take under 0.6s on parquet at SF1 and the ones that are mostly filtered scans of one table
-(TPC-H q06, TPC-DS q09, q28, q88, q90, q96), and per format the TPC-DS queries that time out or fail: q85 on parquet
-(bad join order), q95 except on csv (the CTE inliner can't copy the Glue scan), and q64 and q72 on avro.
+skips the queries that take under 0.6s on parquet at SF1 (TPC-H q06 and TPC-DS q96, mostly filtered scans of one table,
+among them), and per format the TPC-DS queries that time out or come close: q85 on parquet (the base build's join
+order takes ~75s at 2 threads) and q64 and q72 on avro (avro tables are not sampled for their row count).
 
 ## Building
 
