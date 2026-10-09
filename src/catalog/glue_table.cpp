@@ -17,6 +17,7 @@
 #include "catalog/glue_catalog.hpp"
 #include "catalog/glue_schema_entry.hpp"
 #include "planning/hive_multi_file_reader.hpp"
+#include "planning/hive_query_cache.hpp"
 
 namespace duckdb {
 
@@ -62,13 +63,31 @@ GlueTableInfo GlueTable::RefreshTableInfo(ClientContext &context) const {
 // Scan
 //===--------------------------------------------------------------------===//
 TableFunction GlueTable::GetScanFunction(ClientContext &context, unique_ptr<FunctionData> &bind_data) {
-	// Ask Glue what kind of table this is right before scanning: only Hive (Glue native) tables can be read
-	auto latest_info = RefreshTableInfo(context);
-	switch (latest_info.GetFormat()) {
+	// Ask Glue what kind of table this is right before scanning (once per query): only Hive (Glue native) tables can
+	// be read
+	auto key = catalog.GetName().GetIdentifierName() + "\x1f" + table_info.database_name + "\x1f" + table_info.name;
+	auto entry = HiveQueryCache::Get(context)->GetGlueTable(key);
+	shared_ptr<const GlueTableInfo> latest_info;
+	shared_ptr<const vector<GluePartitionInfo>> partitions;
+	{
+		annotated_lock_guard<annotated_mutex> guard(entry->lock);
+		if (!entry->table_info) {
+			entry->table_info = make_shared_ptr<const GlueTableInfo>(RefreshTableInfo(context));
+		}
+		latest_info = entry->table_info;
+		if (latest_info->GetFormat() == GlueTableFormat::HIVE && !table_info.partition_keys.empty() &&
+		    !entry->partitions) {
+			auto &glue_catalog = catalog.Cast<GlueCatalog>();
+			entry->partitions = make_shared_ptr<const vector<GluePartitionInfo>>(
+			    GlueAPI::GetPartitions(context, glue_catalog, latest_info->database_name, latest_info->name));
+		}
+		partitions = entry->partitions;
+	}
+	switch (latest_info->GetFormat()) {
 	case GlueTableFormat::HIVE:
-		return GetHiveScanFunction(context, bind_data, latest_info);
+		return GetHiveScanFunction(context, bind_data, *latest_info, partitions);
 	default:
-		throw NotImplementedException("Scan from table with type %s", latest_info.GetFormatName());
+		throw NotImplementedException("Scan from table with type %s", latest_info->GetFormatName());
 	}
 }
 
@@ -76,7 +95,8 @@ TableFunction GlueTable::GetScanFunction(ClientContext &context, unique_ptr<Func
 // Hive scan
 //===--------------------------------------------------------------------===//
 TableFunction GlueTable::GetHiveScanFunction(ClientContext &context, unique_ptr<FunctionData> &bind_data,
-                                             const GlueTableInfo &latest_info) {
+                                             const GlueTableInfo &latest_info,
+                                             const shared_ptr<const vector<GluePartitionInfo>> &partitions) {
 	// The scan produces the columns this entry was planned with: data columns first, partition keys last. The SerDe
 	// decides the file format (throws for unsupported SerDes).
 	auto scan_info = make_shared_ptr<HiveScanInfo>();
@@ -98,10 +118,8 @@ TableFunction GlueTable::GetHiveScanFunction(ClientContext &context, unique_ptr<
 		scan_info->partition_keys.push_back(key.name);
 	}
 	// the partitions as registered in Glue, each with its own location
-	if (!scan_info->partition_keys.empty()) {
-		auto &glue_catalog = catalog.Cast<GlueCatalog>();
-		scan_info->partitions =
-		    GlueAPI::GetPartitions(context, glue_catalog, latest_info.database_name, latest_info.name);
+	if (!scan_info->partition_keys.empty() && partitions) {
+		scan_info->partitions = *partitions;
 	}
 	return BindHiveScan(context, std::move(scan_info), bind_data);
 }

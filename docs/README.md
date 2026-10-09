@@ -40,7 +40,9 @@ Every format is scanned through a custom `MultiFileReader` (`HiveMultiFileReader
 - Partition column values are the values Glue stores for the partition, not the directory names, typed as Glue's
   partition keys. Files are listed lazily: filters on partition columns, including those a join derives from its
   build side when the scan starts, are applied to the partition values first, so only the partitions a query reads
-  are listed (EXPLAIN shows the partitions kept as `Scanning Files`). When a query reads at least
+  are listed (EXPLAIN shows the partitions kept as `Scanning Files`). A filter the partition values decide is
+  true of every row the scan then reads, and is dropped from the plan, as for `read_parquet` with hive
+  partitioning. When a query reads at least
   `hive_partition_listing_threshold` (default 10) partitions below the table location, the location is listed once,
   recursively (one S3 request per 1000 keys), and the files are matched to their partitions by prefix; fewer
   partitions, and partitions at custom locations, are listed one directory each.
@@ -48,8 +50,15 @@ Every format is scanned through a custom `MultiFileReader` (`HiveMultiFileReader
   of the table reads, or the location of an unpartitioned table; when the scan lists the table location, the
   first page of that listing, which the scan then continues) and reads the row count of its largest file: the
   parquet footer, or the lines of a 64 KiB prefix for csv and json. Every scan of the table in the query scales
-  that one measurement by the partitions it reads, and a scan that lists the same directory reuses the listing.
-  Avro tables are not measured, so planning them lists nothing.
+  that one measurement by the files and bytes of the partitions it reads: those the listing holds completely
+  count with their own size, the others with the average of those. A scan that lists the same directory reuses
+  the listing. Avro tables are not measured, so planning them lists nothing.
+- An unpartitioned parquet table of at most 32 files has the footers of all its files read instead (8 at a time,
+  with `parquet_metadata`): the row count is exact, and the columns get a distinct count for the join order
+  optimizer, the dictionary size the writer recorded or the width of an integer column's min/max. The
+  statistics claim nothing else (no min/max), so nothing is pruned on them.
+- The Glue table definition and the partition list are fetched once per query and table, however often the
+  query scans the table.
 - The schema is Glue's, data columns first and partition keys last, in `PARTITIONED BY` order. Files are matched
   by column name: a column a file does not have (added after the file was written) reads as NULL, a column with
   a different type in the file is cast, and file columns Glue does not list are ignored.
@@ -319,6 +328,10 @@ Glue).
 
 Both loads create their Glue tables with `CREATE TABLE IF NOT EXISTS ... AS`, so changing a load has no effect while
 the tables are in Glue: rebuild the fixture with `make glue-fixture-down && make glue-fixture` first.
+
+`benchmark_runner` runs the benchmarks below its own root (the repository), not the working directory. DuckDB's own
+TPC-H and TPC-DS benchmarks on native tables, the reference for these, run with
+`--root-dir duckdb` (`'benchmark/tpcds/sf1/.*' --sf 10` for TPC-DS at SF10).
 
 `.github/workflows/Regression.yml` builds the benchmark runner for a PR and for its merge base once, then compares
 their timings (5 runs each) in a job per format: the TPC-H and TPC-DS benchmarks of that format, plus
