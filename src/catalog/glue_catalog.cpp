@@ -306,6 +306,14 @@ GlueTable &GlueCatalog::GetHiveTableForDML(ClientContext &context, TableCatalogE
 		                              "write a bucketed layout.",
 		                              statement, table.name.GetIdentifierName(), table_info.DescribeBucketing());
 	}
+	// Athena writes JSON only with the Hive JsonSerDe; OpenX properties (mapping.*, dots.in.keys) would not find the
+	// keys DuckDB writes
+	if (glue_table.table_info.GetSerDe() == HiveSerDe::OPENX_JSON) {
+		throw NotImplementedException("%s into Glue table '%s' is not supported: the table uses the OpenX JSON SerDe "
+		                              "'%s', DuckDB writes JSON tables only with the Hive JsonSerDe "
+		                              "(org.apache.hive.hcatalog.data.JsonSerDe)",
+		                              statement, table.name.GetIdentifierName(), glue_table.table_info.serde_library);
+	}
 	return glue_table;
 }
 
