@@ -1,15 +1,19 @@
-# Runs all sqllogictests of a pull request, on a release build, against a live AWS Glue Data Catalog
-# (test/configs/cloud_glue.json), for a maintainer who suspects a PR breaks the cloud tests. It is never triggered by
-# a PR: a maintainer starts it from the Actions tab (or `gh workflow run CloudGlueTests.yml -f pr_number=123`) after
-# reading the PR, because it runs the PR's code with the AWS credentials of the 'cloud-glue' environment.
+# Runs all sqllogictests of a pull request or a branch, on a release build, against a live AWS Glue Data Catalog
+# (test/configs/cloud_glue.json), for a maintainer who suspects a change breaks the cloud tests. It is never triggered
+# by a PR: a maintainer starts it from the Actions tab (`gh workflow run CloudGlueTests.yml -f pr_number=123` after
+# reading the PR, because it runs the PR's code with the AWS credentials of the 'cloud-glue' environment; without
+# pr_number it tests the branch the run is started on, e.g. `gh workflow run CloudGlueTests.yml --ref main`).
 #
 # The 'cloud-glue' environment provides:
 #   variables  GLUE_CATALOG_ID       the AWS account id of the Glue Data Catalog
 #              GLUE_REGION           its region, e.g. eu-north-1
-#              DEFAULT_S3_LOCATION   S3 prefix the tests write under, e.g. s3://my-bucket/warehouse
 #              AWS_ROLE_ARN          optional: an IAM role to assume through GitHub's OIDC provider
 #   secrets    AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY, when no AWS_ROLE_ARN is given
-# The credentials need Glue and S3 access to that account and prefix. The account needs the Glue database 'default'
+# The tests write to the bucket duckdb-glue-ci-<account id>-<region>, which the workflow creates if it does not exist,
+# under duckdb-aws-glue-cloud-tests/ci-<run id>-<attempt>/, which it deletes at the end; a lifecycle rule expires
+# whatever a failed run leaves under duckdb-aws-glue-cloud-tests/ after 2 days.
+# The credentials need Glue access to that account, and S3 access to that bucket including s3:CreateBucket and
+# s3:PutLifecycleConfiguration. The account needs the Glue database 'default'
 # and the fixture tables and views that scripts/docker-compose.yml creates locally (see docs/README.md, Testing).
 # The tests drop and create tables in it: use an account that holds nothing else.
 
@@ -19,9 +23,9 @@ on:
   workflow_dispatch:
     inputs:
       pr_number:
-        description: Number of the pull request whose head commit is tested
-        required: true
-        type: number
+        description: Number of the pull request whose head commit is tested; empty tests the selected branch
+        required: false
+        type: string
 
 # the tests share the Glue database 'default' of the account: one run at a time
 concurrency:
@@ -38,7 +42,7 @@ jobs:
 
     permissions:
       contents: read
-      # the commit status on the PR's head commit
+      # the commit status on the tested commit
       statuses: write
       # AWS_ROLE_ARN: OIDC token for configure-aws-credentials
       id-token: write
@@ -65,7 +69,7 @@ jobs:
       - name: Check the configuration
         run: |
           missing=0
-          for name in GLUE_CATALOG_ID GLUE_REGION DEFAULT_S3_LOCATION; do
+          for name in GLUE_CATALOG_ID GLUE_REGION; do
             if [ -z "${!name}" ]; then
               echo "::error::Variable $name is not set in the 'cloud-glue' environment"
               missing=1
@@ -75,12 +79,20 @@ jobs:
         env:
           GLUE_CATALOG_ID: ${{ vars.GLUE_CATALOG_ID }}
           GLUE_REGION: ${{ vars.GLUE_REGION }}
-          DEFAULT_S3_LOCATION: ${{ vars.DEFAULT_S3_LOCATION }}
 
-      # resolve the head commit once: a push to the PR during the run does not change what is tested
-      - name: Resolve the pull request
+      # resolve the commit once: a push to the PR or branch during the run does not change what is tested
+      - name: Resolve the commit
         id: pr
         run: |
+          if [ -z "$PR_NUMBER" ]; then
+            echo "sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+            echo "Testing $GITHUB_REF_NAME at $GITHUB_SHA"
+            exit 0
+          fi
+          if ! [[ "$PR_NUMBER" =~ ^[0-9]+$ ]]; then
+            echo "::error::pr_number must be a pull request number, got '$PR_NUMBER'"
+            exit 1
+          fi
           gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER" \
             --jq '"sha=\(.head.sha)\ntitle=\(.title)\nstate=\(.state)"' >> "$GITHUB_OUTPUT"
           gh api "repos/${{ github.repository }}/pulls/$PR_NUMBER" \
@@ -127,8 +139,27 @@ jobs:
           aws-secret-access-key: ${{ vars.AWS_ROLE_ARN == '' && secrets.AWS_SECRET_ACCESS_KEY || '' }}
           aws-region: ${{ vars.GLUE_REGION }}
 
-      # cloud_glue.json with the catalog, region and S3 prefix of the environment; the credentials reach the S3
-      # secret and the Glue client through the credential chain (environment variables)
+      - name: Test bucket
+        id: bucket
+        run: |
+          bucket="duckdb-glue-ci-$GLUE_CATALOG_ID-$GLUE_REGION"
+          if ! aws s3api head-bucket --bucket "$bucket" --expected-bucket-owner "$GLUE_CATALOG_ID" 2>/dev/null; then
+            if [ "$GLUE_REGION" = "us-east-1" ]; then
+              aws s3api create-bucket --bucket "$bucket"
+            else
+              aws s3api create-bucket --bucket "$bucket" --create-bucket-configuration "LocationConstraint=$GLUE_REGION"
+            fi
+          fi
+          aws s3api put-bucket-lifecycle-configuration --bucket "$bucket" --expected-bucket-owner "$GLUE_CATALOG_ID" \
+            --lifecycle-configuration '{"Rules": [{"ID": "expire-ci-data", "Status": "Enabled", "Filter": {"Prefix": "duckdb-aws-glue-cloud-tests/"},
+              "Expiration": {"Days": 2}, "AbortIncompleteMultipartUpload": {"DaysAfterInitiation": 1}}]}'
+          echo "location=s3://$bucket/duckdb-aws-glue-cloud-tests/ci-${{ github.run_id }}-${{ github.run_attempt }}" >> "$GITHUB_OUTPUT"
+        env:
+          GLUE_CATALOG_ID: ${{ vars.GLUE_CATALOG_ID }}
+          GLUE_REGION: ${{ vars.GLUE_REGION }}
+
+      # cloud_glue.json with the catalog, region and S3 prefix of the run; the credentials reach the S3 secret and the
+      # Glue client through the credential chain (environment variables)
       - name: Test config
         run: |
           jq --arg catalog "$GLUE_CATALOG_ID" --arg region "$GLUE_REGION" --arg location "$DEFAULT_S3_LOCATION" '
@@ -142,10 +173,15 @@ jobs:
         env:
           GLUE_CATALOG_ID: ${{ vars.GLUE_CATALOG_ID }}
           GLUE_REGION: ${{ vars.GLUE_REGION }}
-          DEFAULT_S3_LOCATION: ${{ vars.DEFAULT_S3_LOCATION }}
+          DEFAULT_S3_LOCATION: ${{ steps.bucket.outputs.location }}
 
       - name: Run tests
         run: make test-cloud TEST_BUILD=release CLOUD_TEST_CONFIG="$RUNNER_TEMP/cloud_glue_ci.json"
+
+      # the trailing slash keeps the prefix from matching another run's, e.g. ci-123-1 and ci-123-10
+      - name: Delete the run's S3 data
+        if: always() && steps.bucket.outputs.location != ''
+        run: aws s3 rm --recursive --only-show-errors "${{ steps.bucket.outputs.location }}/"
 
       - name: Report the result on the commit
         if: always() && steps.pr.outputs.sha != ''

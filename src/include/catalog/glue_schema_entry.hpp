@@ -11,11 +11,15 @@
 namespace duckdb {
 struct BoundCreateTableInfo;
 struct CreateTableInfo;
+struct SetColumnCommentInfo;
+struct SetCommentInfo;
 
 //! Options accepted in CREATE TABLE ... WITH (...) for Glue tables
 struct GlueCreateTableOptions {
 	//! Optional explicit S3 location of the table
 	string location;
+	//! Optional description of the table (comment = '...'), stored as Glue's Table.Description
+	string description;
 	//! The file format of the table (format = 'parquet' | 'csv' | 'json' | 'avro'), parquet by default
 	HiveFileFormat format = HiveFileFormat::PARQUET;
 	//! csv only: delimiter, quote and escape (single characters; quote and escape empty unless given)
@@ -38,6 +42,10 @@ public:
 
 public:
 	optional_ptr<CatalogEntry> CreateTable(CatalogTransaction transaction, BoundCreateTableInfo &info) override;
+	//! Create a table from a definition whose options were already resolved while planning CTAS. This avoids evaluating
+	//! location, format or dialect expressions a second time when execution begins.
+	optional_ptr<CatalogEntry> CreateTableFromInfo(CatalogTransaction transaction, BoundCreateTableInfo &info,
+	                                               const GlueTableInfo &table_info);
 	optional_ptr<CatalogEntry> CreateFunction(CatalogTransaction transaction, CreateFunctionInfo &info) override;
 	optional_ptr<CatalogEntry> CreateIndex(CatalogTransaction transaction, CreateIndexInfo &info,
 	                                       TableCatalogEntry &table) override;
@@ -57,6 +65,9 @@ public:
 	void DropEntry(ClientContext &context, DropInfo &info) override;
 	optional_ptr<CatalogEntry> LookupEntry(CatalogTransaction transaction, const EntryLookupInfo &lookup_info) override;
 
+	//! Build and validate a Glue table definition without touching Glue. CTAS resolves it once while planning, then
+	//! carries the same value into execution for both catalog creation and file-writer behavior.
+	GlueTableInfo BuildTableInfo(ClientContext &context, const CreateTableInfo &create_info);
 	//! Bind and evaluate the constant expressions of a WITH (<key> = <value>, ...) option list
 	static vector<pair<string, Value>>
 	EvaluateOptions(ClientContext &context, const case_insensitive_map_t<unique_ptr<ParsedExpression>> &options,
@@ -65,7 +76,7 @@ public:
 	//! BucketColumns, NumberOfBuckets or SortColumns (case-insensitive)
 	static bool IsBucketingOption(const string &key);
 	//! The 'table_type' option of CREATE TABLE: HIVE (the default) or ICEBERG
-	static GlueTableFormat GetCreateTableFormat(ClientContext &context, const CreateTableInfo &create_info);
+	static GlueFormat GetCreateTableFormat(ClientContext &context, const CreateTableInfo &create_info);
 	//! The existing entry when CREATE TABLE IF NOT EXISTS names one, nullptr when there is none; throws otherwise
 	optional_ptr<CatalogEntry> CheckCreateTableConflict(ClientContext &context, const CreateTableInfo &create_info);
 	//! The CREATE TABLE of an Iceberg table, rebound to the schema of the Iceberg catalog
@@ -77,11 +88,17 @@ public:
 	GlueTable &RefreshTable(ClientContext &context, const string &table_name);
 
 private:
+	optional_ptr<CatalogEntry> CreateTableInternal(CatalogTransaction transaction, BoundCreateTableInfo &info,
+	                                               const GlueTableInfo *resolved_table_info);
 	static bool CatalogTypeIsSupported(CatalogType type);
 	void AlterTableProperties(ClientContext &context, AlterTableInfo &alter_table);
 	optional_ptr<CatalogEntry> CreateIcebergTable(ClientContext &context, BoundCreateTableInfo &info);
 	//! The Glue entry of an Iceberg table, or nullptr for any other entry
 	static optional_ptr<GlueTable> AsIcebergTable(optional_ptr<CatalogEntry> entry);
+	//! COMMENT ON COLUMN: Glue keeps the comment with the column
+	void SetColumnComment(ClientContext &context, const string &table_name, SetColumnCommentInfo &info);
+	//! COMMENT ON TABLE: Glue stores it as the table's Description
+	void SetTableComment(ClientContext &context, const string &table_name, SetCommentInfo &info);
 
 public:
 	//! The database definition as returned by Glue

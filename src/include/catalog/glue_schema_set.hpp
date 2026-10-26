@@ -24,7 +24,6 @@ public:
 	//! Insert a (new) schema entry into the set, replacing any existing entry with the same name
 	optional_ptr<CatalogEntry> CreateEntry(unique_ptr<GlueSchemaEntry> entry);
 	void RemoveEntry(const string &name);
-	void ClearEntries();
 	//! Invalidate the cached entry of a table in a cached schema (see GlueTableSet::InvalidateEntry)
 	void InvalidateTableEntry(const string &schema_name, const string &table_name);
 
@@ -33,6 +32,9 @@ public:
 
 private:
 	void LoadEntries(ClientContext &context);
+	//! Move an entry out of the set; the transaction manager keeps it, and the tables it caches, alive while a
+	//! running statement may use them. Called with entry_lock held.
+	void RetireEntry(const string &name);
 
 private:
 	GlueCatalog &catalog;

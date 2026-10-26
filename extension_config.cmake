@@ -16,15 +16,14 @@ duckdb_extension_load(tpcds)
 if (NOT MINGW)
     duckdb_extension_load(avro
         GIT_URL https://github.com/duckdb/duckdb-avro
-        GIT_TAG 859d56d1bcf8e1645a4d6cb905b96ebf327af139
+        GIT_TAG 758fb6063cbb6da49b2e1c16c4044cfcafefc52f
         SUBMODULES "third_party/avro-c"
     )
 
     # Iceberg tables in Glue are served by Glue's Iceberg REST endpoint through an internal iceberg catalog. Pinned
-    # (with its patches) to the hash the duckdb submodule pins in .github/config/extensions/iceberg.cmake.
+    # to the hash the duckdb submodule pins in .github/config/extensions/iceberg.cmake.
     duckdb_extension_load(iceberg
         GIT_URL https://github.com/duckdb/duckdb-iceberg
-        GIT_TAG 5b9ff899a17edc4289c4b3760a58c931736b4863
-        APPLY_PATCHES
+        GIT_TAG 4c0c0874c48ec82a3e29910554891d04bcc0e988
     )
 endif()

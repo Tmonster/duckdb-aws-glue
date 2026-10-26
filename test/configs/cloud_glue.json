@@ -42,6 +42,25 @@
 			]
 		},
 		{
+			"reason": "needs the fixture tables that scripts/docker-compose.yml creates in the local Glue",
+			"paths": [
+				"test/sql/hive/dml/formats/csv/test_csv_serde_properties.test"
+			]
+		},
+		{
+			"reason": "needs the OpenX JSON fixture tables that scripts/docker-compose.yml creates in the local Glue",
+			"paths": [
+				"test/sql/hive/dml/insert/insert_into_openx_json_table.test",
+				"test/sql/hive/dml/formats/json/test_json_serde_properties.test"
+			]
+		},
+		{
+			"reason": "needs the Delta / ORC / CSV / OpenX JSON fixture tables that scripts/docker-compose.yml creates in the local Glue, to exercise the 'Not supported: ...' error paths of duckdb_tables().sql",
+			"paths": [
+				"test/sql/hive/functions/duckdb_tables_sql.test"
+			]
+		},
+		{
 			"reason": "counts moto's single GetPartitions request per partition listing: AWS Glue lists in segments (glue_get_partitions_segments) and ends every listing with an extra, empty page",
 			"paths": [
 				"test/sql/hive/bugs/s3_plan_time_cost_invariants.test"
@@ -51,6 +70,12 @@
 			"reason": "AWS Glue stores column names in lower case ('Mixed Case' reads back as 'mixed case'); moto keeps them as given",
 			"paths": [
 				"test/sql/hive/ddl/alter_column/glue_replace_columns.test"
+			]
+		},
+		{
+			"reason": "needs the fixture tables with other engines' InputFormats that scripts/docker-compose.yml creates in the local Glue",
+			"paths": [
+				"test/sql/hive/bugs/foreign_input_format_as_hive.test"
 			]
 		}
 	]

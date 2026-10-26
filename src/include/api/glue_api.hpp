@@ -1,8 +1,12 @@
 #pragma once
 
+#include "duckdb/common/exception.hpp"
+#include "duckdb/common/optional_ptr.hpp"
+
 #include "core/glue_info.hpp"
 
 #include "duckdb/common/pair.hpp"
+#include "duckdb/common/enums/set_scope.hpp"
 
 #include <memory>
 
@@ -15,12 +19,21 @@ class GlueClient;
 namespace duckdb {
 class ClientContext;
 class GlueCatalog;
+class Value;
+
+class GlueException : public IOException {
+public:
+	GlueException(const string &message, bool access_denied) : IOException(message), access_denied(access_denied) {
+	}
+
+	bool access_denied;
+};
 
 //! Thin wrapper around the AWS SDK Glue client
 class GlueAPI {
 public:
-	//! Verify that the catalog can be reached with the configured credentials
-	static void VerifyConnection(ClientContext &context, GlueCatalog &catalog);
+	//! CatalogId from the GetDatabases response
+	static string GetReportedCatalogId(ClientContext &context, GlueCatalog &catalog);
 
 	//! List all databases of the catalog
 	static vector<GlueDatabaseInfo> GetDatabases(ClientContext &context, GlueCatalog &catalog);
@@ -28,8 +41,11 @@ public:
 	//! object of the response as JSON.
 	static bool GetDatabase(ClientContext &context, GlueCatalog &catalog, const string &database_name,
 	                        GlueDatabaseInfo &result, string *raw_json = nullptr);
-	//! List all tables of a database
-	static vector<GlueTableInfo> GetTables(ClientContext &context, GlueCatalog &catalog, const string &database_name);
+	//! List all tables of a database; none when the database no longer exists or its tables may not be listed.
+	//! With 'single_page' only Glue's first page is fetched and 'has_more' reports whether the database holds
+	//! tables beyond it; a refused permission throws instead of returning none.
+	static vector<GlueTableInfo> GetTables(ClientContext &context, GlueCatalog &catalog, const string &database_name,
+	                                       bool single_page = false, optional_ptr<bool> has_more = nullptr);
 	//! Returns false if the database holds no tables (or views), otherwise true with the name of one of them
 	static bool GetAnyTableName(ClientContext &context, GlueCatalog &catalog, const string &database_name,
 	                            string &table_name);
@@ -54,12 +70,21 @@ public:
 	//! ALTER TABLE on Hive tables; open table formats keep their schema in their own metadata.
 	static void UpdateTableColumns(ClientContext &context, GlueCatalog &catalog, const string &database_name,
 	                               const string &table_name, const vector<GlueColumn> &columns);
+	//! Replace the partition keys of a table, keeping everything else of its Glue definition as is. Only the names,
+	//! types and comments of the partition keys are overwritten; the StorageDescriptor and registered partitions are
+	//! untouched. Used for COMMENT ON COLUMN on a partition key.
+	static void UpdateTablePartitionKeys(ClientContext &context, GlueCatalog &catalog, const string &database_name,
+	                                     const string &table_name, const vector<GlueColumn> &partition_keys);
+	//! Replace the description of a table (Glue's Table.Description), keeping everything else of its Glue definition
+	//! as is. An empty description clears it.
+	static void UpdateTableDescription(ClientContext &context, GlueCatalog &catalog, const string &database_name,
+	                                   const string &table_name, const string &description);
 	//! Move the table (StorageDescriptor.Location); existing partitions keep their own locations
 	static void SetTableLocation(ClientContext &context, GlueCatalog &catalog, const string &database_name,
 	                             const string &table_name, const string &location);
 	//! Change the table parameters (Hive's TBLPROPERTIES): the 'set' entries are added or overwritten and the 'unset'
 	//! keys removed, the other parameters and the rest of the Glue definition stay as they are. The parameters the
-	//! table format is derived from (GlueTableInfo::IsFormatParameter) are refused.
+	//! table format is derived from (GlueTableFormat::IsParameter) are refused.
 	static void UpdateTableParameters(ClientContext &context, GlueCatalog &catalog, const string &database_name,
 	                                  const string &table_name, const vector<pair<string, string>> &set,
 	                                  const vector<string> &unset);
@@ -69,6 +94,11 @@ public:
 	//! Fetch a single partition by its values, returns false if it does not exist
 	static bool GetPartition(ClientContext &context, GlueCatalog &catalog, const string &database_name,
 	                         const string &table_name, const vector<string> &values, GluePartitionInfo &result);
+	//! GetPartition with the partition's storage descriptor and parameters. 'raw_json' (optional) receives the Glue
+	//! Partition object of the response as JSON.
+	static bool GetPartition(ClientContext &context, GlueCatalog &catalog, const string &database_name,
+	                         const string &table_name, const vector<string> &values, GluePartitionDetails &result,
+	                         string *raw_json = nullptr);
 	//! Register one partition of a Hive table. Returns false if it already exists and 'if_not_exists' is set, throws
 	//! a CatalogException if it already exists otherwise.
 	static bool CreatePartition(ClientContext &context, GlueCatalog &catalog, const string &database_name,
@@ -84,9 +114,12 @@ public:
 	//! List the partitions of a Hive table (GetPartitions, all pages)
 	static vector<GluePartitionInfo> GetPartitions(ClientContext &context, GlueCatalog &catalog,
 	                                               const string &database_name, const string &table_name);
-	//! Register partitions of a Hive table (BatchCreatePartition). Partitions that already exist are skipped.
+	//! Register partitions of a Hive table (BatchCreatePartition). Partitions that already exist are skipped; throws
+	//! for the first partition Glue refuses, after retrying the errors that may pass.
 	static void BatchCreatePartitions(ClientContext &context, GlueCatalog &catalog, const string &database_name,
 	                                  const string &table_name, const vector<GluePartitionInput> &partitions);
+	//! SET callback of glue_debug_fail_partition_registration: rejects a value that is not '<error code>:<index>'
+	static void CheckDebugFailPartitionRegistration(ClientContext &context, SetScope scope, Value &parameter);
 	//! Delete a table (the data files are left in place), throws a CatalogException if it does not exist
 	static void DeleteTable(ClientContext &context, GlueCatalog &catalog, const string &database_name,
 	                        const string &table_name);

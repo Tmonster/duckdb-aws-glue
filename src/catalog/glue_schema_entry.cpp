@@ -1,8 +1,10 @@
 #include "catalog/glue_schema_entry.hpp"
 #include "catalog/glue_view.hpp"
+#include "catalog/glue_view_names.hpp"
 
 #include "duckdb/catalog/catalog_transaction.hpp"
 #include "duckdb/main/client_context.hpp"
+#include "duckdb/parser/parsed_data/comment_on_column_info.hpp"
 #include "duckdb/parser/parsed_data/alter_info.hpp"
 #include "duckdb/parser/parsed_data/alter_table_info.hpp"
 #include "duckdb/common/enum_util.hpp"
@@ -81,19 +83,19 @@ bool GlueSchemaEntry::IsBucketingOption(const string &key) {
 	       StringUtil::CIEquals(key, "SortColumns");
 }
 
-GlueTableFormat GlueSchemaEntry::GetCreateTableFormat(ClientContext &context, const CreateTableInfo &create_info) {
+GlueFormat GlueSchemaEntry::GetCreateTableFormat(ClientContext &context, const CreateTableInfo &create_info) {
 	auto entry = create_info.options.find("table_type");
 	if (entry == create_info.options.end()) {
-		return GlueTableFormat::HIVE;
+		return GlueFormat::HIVE;
 	}
 	case_insensitive_map_t<unique_ptr<ParsedExpression>> option;
 	option.emplace(entry->first, entry->second->Copy());
 	auto table_type = StringUtil::Lower(EvaluateOptions(context, option, "CREATE TABLE")[0].second.ToString());
 	if (table_type == "hive") {
-		return GlueTableFormat::HIVE;
+		return GlueFormat::HIVE;
 	}
 	if (table_type == "iceberg") {
-		return GlueTableFormat::ICEBERG;
+		return GlueFormat::ICEBERG;
 	}
 	throw BinderException("Unknown Glue table type '%s' for option 'table_type', accepted values are 'hive' and "
 	                      "'iceberg'",
@@ -285,6 +287,9 @@ GlueCreateTableOptions GlueSchemaEntry::ParseCreateTableOptions(ClientContext &c
 			if (result.location.empty()) {
 				throw BinderException("CREATE TABLE option 'location' must not be empty");
 			}
+		} else if (StringUtil::CIEquals(key, "comment")) {
+			// Stored as Glue's Table.Description
+			result.description = string_value;
 		} else if (StringUtil::CIEquals(key, "delimiter") || StringUtil::CIEquals(key, "quote") ||
 		           StringUtil::CIEquals(key, "escape")) {
 			// the csv dialect: Hive SerDes take single characters
@@ -323,6 +328,27 @@ GlueCreateTableOptions GlueSchemaEntry::ParseCreateTableOptions(ClientContext &c
 		}
 	}
 	return result;
+}
+
+static void ThrowIfCollated(const LogicalType &type, const string &column_name) {
+	auto collation = StringType::GetCollation(type);
+	if (!collation.empty()) {
+		throw NotImplementedException("Collation \"%s\" of column \"%s\" is not supported for tables in a Glue catalog",
+		                              collation, column_name);
+	}
+}
+
+//! A Glue column is a name and a type: refuse what DuckDB would otherwise drop when the column is stored in Glue
+static void ThrowIfUnsupportedColumn(const ColumnDefinition &column) {
+	auto &name = column.Name().GetIdentifierName();
+	if (column.Generated()) {
+		throw NotImplementedException("Generated column \"%s\" is not supported for tables in a Glue catalog", name);
+	}
+	if (column.HasDefaultValue()) {
+		throw NotImplementedException("Default value of column \"%s\" is not supported for tables in a Glue catalog",
+		                              name);
+	}
+	ThrowIfCollated(column.Type(), name);
 }
 
 //! Tables and views share one catalog set (as in DuckDB's own schema), so a lookup by name returns either; the
@@ -405,31 +431,24 @@ optional_ptr<GlueTable> GlueSchemaEntry::AsIcebergTable(optional_ptr<CatalogEntr
 		return nullptr;
 	}
 	auto &glue_table = entry->Cast<GlueTable>();
-	if (glue_table.table_info.GetFormat() != GlueTableFormat::ICEBERG) {
+	if (glue_table.table_info.GetFormat().format != GlueFormat::ICEBERG) {
 		return nullptr;
 	}
 	return &glue_table;
 }
 
-optional_ptr<CatalogEntry> GlueSchemaEntry::CreateTable(CatalogTransaction transaction, BoundCreateTableInfo &info) {
-	auto &context = transaction.GetContext();
-	GlueCatalog::ThrowIfInExplicitTransaction(context);
-	auto &glue_catalog = catalog.Cast<GlueCatalog>();
-	auto &base = info.Base();
-	auto table_name = base.GetTableName().GetIdentifierName();
-
-	if (CheckCreateTableConflict(context, base)) {
-		return nullptr;
-	}
-	if (GetCreateTableFormat(context, base) == GlueTableFormat::ICEBERG) {
-		return CreateIcebergTable(context, info);
-	}
+GlueTableInfo GlueSchemaEntry::BuildTableInfo(ClientContext &context, const CreateTableInfo &base) {
 	if (!base.constraints.empty()) {
 		throw NotImplementedException("Constraints are not supported when creating tables in a Glue catalog");
 	}
+	for (auto &column : base.columns.Logical()) {
+		ThrowIfUnsupportedColumn(column);
+	}
+	auto &glue_catalog = catalog.Cast<GlueCatalog>();
+	auto table_name = base.GetTableName().GetIdentifierName();
 	auto options = ParseCreateTableOptions(context, base);
 	// Hive partitions are columns: PARTITIONED BY must name columns of the table, which become the PartitionKeys
-	// (in the given order) and are stored in the directory names rather than in the data files
+	// (in the given order) and are stored in the directory names rather than in the data files.
 	vector<string> partition_columns;
 	for (auto &key : base.partition_keys) {
 		if (key->GetExpressionType() != ExpressionType::COLUMN_REF) {
@@ -447,7 +466,8 @@ optional_ptr<CatalogEntry> GlueSchemaEntry::CreateTable(CatalogTransaction trans
 		}
 		for (auto &existing : partition_columns) {
 			if (StringUtil::CIEquals(existing, column_name)) {
-				throw BinderException("PARTITIONED BY column '%s' is listed twice", column_name);
+				throw BinderException("PARTITIONED BY column '%s' is listed twice for table '%s'", column_name,
+				                      table_name);
 			}
 		}
 		partition_columns.push_back(column_name);
@@ -465,13 +485,34 @@ optional_ptr<CatalogEntry> GlueSchemaEntry::CreateTable(CatalogTransaction trans
 	GlueTableInfo table;
 	table.name = table_name;
 	table.database_name = database_info.name;
+	// Table description: `WITH (comment = '...')` is the primary spelling (DuckDB's parser accepts a trailing
+	// `COMMENT '...'` only on CREATE SCHEMA, not CREATE TABLE); CreateInfo::comment is a Value and set by a
+	// future parser or an engine wrapper, so honor it too and let the WITH value override when both are given.
+	if (!base.comment.IsNull()) {
+		table.description = base.comment.ToString();
+	}
+	if (!options.description.empty()) {
+		table.description = options.description;
+	}
 	table.location =
 	    options.location.empty() ? glue_catalog.GetTableLocation(database_info, table_name) : options.location;
 	table.parameters = options.parameters;
 	table.file_format = options.format;
-	table.csv_delimiter = options.csv_delimiter;
-	table.csv_quote = options.csv_quote;
-	table.csv_escape = options.csv_escape;
+	if (table.file_format == HiveFileFormat::CSV) {
+		// with a quote or escape character OpenCSVSerde (which quotes), without both LazySimpleSerDe (which does not)
+		if (options.csv_quote.empty() && options.csv_escape.empty()) {
+			table.serde_library = "org.apache.hadoop.hive.serde2.lazy.LazySimpleSerDe";
+			table.serde_parameters["field.delim"] = options.csv_delimiter;
+			table.serde_parameters["serialization.format"] = options.csv_delimiter;
+		} else {
+			// the escape character defaults to the quote character, like DuckDB's COPY
+			string quote = options.csv_quote.empty() ? "\"" : options.csv_quote;
+			table.serde_library = "org.apache.hadoop.hive.serde2.OpenCSVSerde";
+			table.serde_parameters["separatorChar"] = options.csv_delimiter;
+			table.serde_parameters["quoteChar"] = quote;
+			table.serde_parameters["escapeChar"] = options.csv_escape.empty() ? quote : options.csv_escape;
+		}
+	}
 	table.bucket_columns = options.bucket_columns;
 	table.number_of_buckets = options.number_of_buckets;
 	table.sort_columns = options.sort_columns;
@@ -482,6 +523,9 @@ optional_ptr<CatalogEntry> GlueSchemaEntry::CreateTable(CatalogTransaction trans
 		GlueColumn glue_column;
 		glue_column.name = column.Name().GetIdentifierName();
 		glue_column.type = GlueTypes::FromLogicalType(column.Type());
+		if (!column.Comment().IsNull()) {
+			glue_column.comment = column.Comment().ToString();
+		}
 		table.columns.push_back(std::move(glue_column));
 	}
 	for (auto &partition_column : partition_columns) {
@@ -489,11 +533,45 @@ optional_ptr<CatalogEntry> GlueSchemaEntry::CreateTable(CatalogTransaction trans
 		GlueColumn glue_column;
 		glue_column.name = column.Name().GetIdentifierName();
 		glue_column.type = GlueTypes::FromLogicalType(column.Type());
+		if (!column.Comment().IsNull()) {
+			glue_column.comment = column.Comment().ToString();
+		}
 		table.partition_keys.push_back(std::move(glue_column));
 	}
 	if (table.columns.empty()) {
 		throw BinderException("Table '%s' needs at least one column that is not a partition column", table_name);
 	}
+	return table;
+}
+
+optional_ptr<CatalogEntry> GlueSchemaEntry::CreateTable(CatalogTransaction transaction, BoundCreateTableInfo &info) {
+	return CreateTableInternal(transaction, info, nullptr);
+}
+
+optional_ptr<CatalogEntry> GlueSchemaEntry::CreateTableFromInfo(CatalogTransaction transaction,
+                                                                BoundCreateTableInfo &info,
+                                                                const GlueTableInfo &table_info) {
+	return CreateTableInternal(transaction, info, &table_info);
+}
+
+optional_ptr<CatalogEntry> GlueSchemaEntry::CreateTableInternal(CatalogTransaction transaction,
+                                                                BoundCreateTableInfo &info,
+                                                                const GlueTableInfo *resolved_table_info) {
+	auto &context = transaction.GetContext();
+	GlueCatalog::ThrowIfInExplicitTransaction(context);
+	auto &glue_catalog = catalog.Cast<GlueCatalog>();
+	auto &base = info.Base();
+	auto table_name = base.GetTableName().GetIdentifierName();
+
+	if (CheckCreateTableConflict(context, base)) {
+		return nullptr;
+	}
+	if (GetCreateTableFormat(context, base) == GlueFormat::ICEBERG) {
+		return CreateIcebergTable(context, info);
+	}
+	auto table = resolved_table_info ? *resolved_table_info : BuildTableInfo(context, base);
+	D_ASSERT(table.name == table_name);
+	D_ASSERT(table.database_name == database_info.name);
 	GlueAPI::CreateHiveTable(context, glue_catalog, table);
 
 	// re-fetch so the entry reflects what Glue stored
@@ -538,19 +616,43 @@ optional_ptr<CatalogEntry> GlueSchemaEntry::CreateView(CatalogTransaction transa
 			break;
 		}
 	}
+	if (info.binding_mode == CreateViewBindingMode::SKIP_BINDING) {
+		throw NotImplementedException("Glue views can not be created WITH (DEFER_BINDING) yet");
+	}
 
 	GlueViewInfo view;
 	view.database_name = database_info.name;
 	view.name = view_name;
+	// a DuckDB view's ViewOriginalText: the user's SQL; ViewExpandedText: tables of this catalog as db.t, of other
+	// catalogs by their Glue catalog id or "external:<type>:<alias>"
 	view.sql = GlueView::RenderViewSql(info);
-	try {
-		// what is stored must read back: never write a view DuckDB itself could not parse
-		auto parser = Parser::GetBuiltinParser();
-		CreateViewInfo::ParseSelect(parser, view.sql);
-	} catch (std::exception &ex) {
-		ErrorData error(ex);
-		throw InternalException("The SQL rendered for Glue view \"%s\" does not parse: %s\n%s", view_name,
-		                        error.RawMessage(), view.sql);
+	auto expanded = unique_ptr_cast<SQLStatement, SelectStatement>(info.query->Copy());
+	GlueViewNames::QualifyForStorage(context, glue_catalog, name, *expanded->node);
+	view.expanded_sql = expanded->ToString();
+	// names were resolved by lookups, not the binder: check they bind to the same column types (not names: an
+	// unaliased expression is named after its text, which the rewrite changes)
+	auto check = unique_ptr_cast<SQLStatement, SelectStatement>(expanded->Copy());
+	auto aliases = GlueViewNames::AttachedAliases(glue_catalog, GlueViewNames::ReferencedCatalogIds(*check->node));
+	GlueViewNames::ResolveForReading(glue_catalog, database_info.name + "." + view_name, aliases, *check->node);
+	GlueViewNames::PinToCatalog(*check->node, catalog.GetName());
+	vector<LogicalType> types;
+	vector<Identifier> names;
+	Binder::BindView(context, *check, catalog.GetName(), name, nullptr, info.aliases, types, names);
+	if (types != info.types) {
+		throw BinderException("The ViewExpandedText of Glue view \"%s\" binds to other column types than the view "
+		                      "query:\n%s",
+		                      view_name, view.expanded_sql);
+	}
+	for (auto &text : {view.sql, view.expanded_sql}) {
+		try {
+			// what is stored must read back: never write a view DuckDB itself could not parse
+			auto parser = Parser::GetBuiltinParser();
+			CreateViewInfo::ParseSelect(parser, text);
+		} catch (std::exception &ex) {
+			ErrorData error(ex);
+			throw InternalException("The SQL rendered for Glue view \"%s\" does not parse: %s\n%s", view_name,
+			                        error.RawMessage(), text);
+		}
 	}
 	view.secure = info.security_type == ViewSecurityType::SECURE_VIEW;
 	// the stored columns carry the column alias list of CREATE VIEW: an alias replaces the query's own name
@@ -558,7 +660,7 @@ optional_ptr<CatalogEntry> GlueSchemaEntry::CreateView(CatalogTransaction transa
 		GlueColumn column;
 		auto aliased = i < info.aliases.size() && !info.aliases[i].GetIdentifierName().empty();
 		column.name = (aliased ? info.aliases[i] : info.names[i]).GetIdentifierName();
-		column.type = GlueTypes::FromLogicalType(info.types[i]);
+		column.type = info.types[i].ToString();
 		view.columns.push_back(std::move(column));
 	}
 	if (existing) {
@@ -641,7 +743,7 @@ static void CheckTablePropertyChangeable(const string &key) {
 	if (key.empty()) {
 		throw InvalidInputException("A table property needs a name");
 	}
-	if (GlueTableInfo::IsFormatParameter(key)) {
+	if (GlueTableFormat::IsParameter(key)) {
 		throw InvalidInputException("Table property '%s' decides how the table is read and can not be changed "
 		                            "with ALTER TABLE",
 		                            key);
@@ -672,6 +774,63 @@ void GlueSchemaEntry::AlterTableProperties(ClientContext &context, AlterTableInf
 	RefreshTable(context, table_name);
 }
 
+//! Glue keeps BucketColumns and SortColumns as they are, so a column they name can not be dropped or renamed
+static void CheckNotClustering(const GlueTableInfo &table, const string &table_name, const string &name,
+                               const char *action) {
+	for (auto &bucket_column : table.bucket_columns) {
+		if (StringUtil::CIEquals(bucket_column, name)) {
+			throw CatalogException("Column \"%s\" is a bucket column of table \"%s\" and can not be %s", name,
+			                       table_name, action);
+		}
+	}
+	for (auto &sort_column : table.sort_columns) {
+		if (StringUtil::CIEquals(sort_column.name, name)) {
+			throw CatalogException("Column \"%s\" is a sort column of table \"%s\" and can not be %s", name, table_name,
+			                       action);
+		}
+	}
+}
+
+void GlueSchemaEntry::SetColumnComment(ClientContext &context, const string &table_name, SetColumnCommentInfo &info) {
+	auto &glue_catalog = catalog.Cast<GlueCatalog>();
+	// Work on the current Glue definition, not the cached one
+	GlueTableInfo current;
+	if (!GlueAPI::GetTable(context, glue_catalog, database_info.name, table_name, current)) {
+		throw CatalogException("Table with name \"%s\" does not exist in Glue database \"%s\"", table_name,
+		                       database_info.name);
+	}
+	auto &name = info.column_name.GetIdentifierName();
+	auto by_name = [&](const GlueColumn &column) {
+		return StringUtil::CIEquals(column.name, name);
+	};
+	auto partition_key = std::find_if(current.partition_keys.begin(), current.partition_keys.end(), by_name);
+	if (partition_key != current.partition_keys.end()) {
+		// NULL removes the comment
+		partition_key->comment = info.comment_value.IsNull() ? string() : info.comment_value.ToString();
+		GlueAPI::UpdateTablePartitionKeys(context, glue_catalog, database_info.name, table_name,
+		                                  current.partition_keys);
+		RefreshTable(context, table_name);
+		return;
+	}
+	auto columns = current.columns;
+	auto column = std::find_if(columns.begin(), columns.end(), by_name);
+	if (column == columns.end()) {
+		throw CatalogException("Table \"%s\" does not have a column with name \"%s\"", table_name, name);
+	}
+	// NULL removes the comment
+	column->comment = info.comment_value.IsNull() ? string() : info.comment_value.ToString();
+	GlueAPI::UpdateTableColumns(context, glue_catalog, database_info.name, table_name, columns);
+	RefreshTable(context, table_name);
+}
+
+void GlueSchemaEntry::SetTableComment(ClientContext &context, const string &table_name, SetCommentInfo &info) {
+	auto &glue_catalog = catalog.Cast<GlueCatalog>();
+	// NULL removes the description
+	auto description = info.comment_value.IsNull() ? string() : info.comment_value.ToString();
+	GlueAPI::UpdateTableDescription(context, glue_catalog, database_info.name, table_name, description);
+	RefreshTable(context, table_name);
+}
+
 void GlueSchemaEntry::Alter(CatalogTransaction transaction, AlterInfo &info) {
 	auto &context = transaction.GetContext();
 	GlueCatalog::ThrowIfInExplicitTransaction(context);
@@ -690,16 +849,25 @@ void GlueSchemaEntry::Alter(CatalogTransaction transaction, AlterInfo &info) {
 			    "Glue cannot rename a view; use CREATE OR REPLACE VIEW under the new name and DROP "
 			    "VIEW the old one");
 		}
-		if (info.type == AlterType::SET_COMMENT) {
+		if (info.type == AlterType::SET_COMMENT || info.type == AlterType::SET_COLUMN_COMMENT) {
 			throw NotImplementedException("Comments on Glue views are not supported yet");
 		}
 		throw BinderException("\"%s\" is a view", table_name);
 	}
 	auto &glue_table = entry->Cast<GlueTable>();
-	if (glue_table.table_info.GetFormat() != GlueTableFormat::HIVE) {
+	auto format = glue_table.table_info.GetFormat();
+	if (!format.IsHive()) {
 		throw NotImplementedException("ALTER TABLE is only supported for Hive tables in a Glue catalog, '%s' is a %s "
 		                              "table",
-		                              table_name, glue_table.table_info.GetFormatName());
+		                              table_name, format.Describe(glue_table.table_info));
+	}
+	if (info.type == AlterType::SET_COLUMN_COMMENT) {
+		SetColumnComment(context, table_name, info.Cast<SetColumnCommentInfo>());
+		return;
+	}
+	if (info.type == AlterType::SET_COMMENT) {
+		SetTableComment(context, table_name, info.Cast<SetCommentInfo>());
+		return;
 	}
 	if (info.type != AlterType::ALTER_TABLE) {
 		throw NotImplementedException("Only ALTER TABLE is supported for Glue tables");
@@ -740,9 +908,7 @@ void GlueSchemaEntry::Alter(CatalogTransaction transaction, AlterInfo &info) {
 			}
 			throw CatalogException("Column with name \"%s\" already exists in table \"%s\"", name, table_name);
 		}
-		if (add.new_column.HasDefaultValue()) {
-			throw NotImplementedException("Glue tables do not support column default values");
-		}
+		ThrowIfUnsupportedColumn(add.new_column);
 		GlueColumn column;
 		column.name = name;
 		column.type = GlueTypes::FromLogicalType(add.new_column.Type());
@@ -762,19 +928,13 @@ void GlueSchemaEntry::Alter(CatalogTransaction transaction, AlterInfo &info) {
 			}
 			throw CatalogException("Table \"%s\" does not have a column with name \"%s\"", table_name, name);
 		}
-		// Glue keeps BucketColumns and SortColumns as they are, naming a column the table no longer has
-		for (auto &bucket_column : current.bucket_columns) {
-			if (StringUtil::CIEquals(bucket_column, name)) {
-				throw CatalogException("Column \"%s\" is a bucket column of table \"%s\" and can not be dropped", name,
-				                       table_name);
-			}
+		CheckNotClustering(current, table_name, name, "dropped");
+		if (current.GetFileFormat() == HiveFileFormat::CSV) {
+			throw CatalogException("Can not drop column \"%s\" from table \"%s\": DROP COLUMN is not "
+			                       "supported for csv (text) tables",
+			                       name, table_name);
 		}
-		for (auto &sort_column : current.sort_columns) {
-			if (StringUtil::CIEquals(sort_column.name, name)) {
-				throw CatalogException("Column \"%s\" is a sort column of table \"%s\" and can not be dropped", name,
-				                       table_name);
-			}
-		}
+
 		if (columns.size() == 1) {
 			throw CatalogException("Can not drop column \"%s\": table \"%s\" needs at least one column", name,
 			                       table_name);
@@ -782,6 +942,34 @@ void GlueSchemaEntry::Alter(CatalogTransaction transaction, AlterInfo &info) {
 		columns.erase(std::remove_if(columns.begin(), columns.end(),
 		                             [&](const GlueColumn &column) { return StringUtil::CIEquals(column.name, name); }),
 		              columns.end());
+		break;
+	}
+	case AlterTableType::RENAME_COLUMN: {
+		auto &rename = alter_table.Cast<RenameColumnInfo>();
+		auto &name = rename.old_name.GetIdentifierName();
+		auto &new_name = rename.new_name.GetIdentifierName();
+		auto column = find_column(columns, name);
+		if (!column) {
+			if (is_partition_key(name)) {
+				throw CatalogException("Column \"%s\" is a partition key of table \"%s\" and can not be renamed: the "
+				                       "existing partition directories are named after it (%s=...)",
+				                       name, table_name, name);
+			}
+			throw CatalogException("Table \"%s\" does not have a column with name \"%s\"", table_name, name);
+		}
+		auto existing = find_column(columns, new_name);
+		if ((existing && existing.get() != column.get()) || is_partition_key(new_name)) {
+			throw CatalogException("Column with name \"%s\" already exists in table \"%s\"", new_name, table_name);
+		}
+		// csv files are read by position; the other formats match their columns by name
+		if (current.GetFileFormat() != HiveFileFormat::CSV) {
+			throw NotImplementedException(
+			    "Can not rename column \"%s\" of table \"%s\": its data files are matched to the columns by name, so "
+			    "the existing data would read as NULL; use glue_replace_columns to replace the column deliberately",
+			    name, table_name);
+		}
+		CheckNotClustering(current, table_name, column->name, "renamed");
+		column->name = new_name;
 		break;
 	}
 	case AlterTableType::ALTER_COLUMN_TYPE: {
@@ -799,12 +987,14 @@ void GlueSchemaEntry::Alter(CatalogTransaction transaction, AlterInfo &info) {
 		if (!column) {
 			throw CatalogException("Table \"%s\" does not have a column with name \"%s\"", table_name, name);
 		}
+		ThrowIfCollated(change.target_type, name);
 		// without USING the binder fills in CAST(column AS type)
 		CastExpression plain_cast(change.target_type, make_uniq<ColumnRefExpression>(change.column_path));
 		if (change.expression && !change.expression->Equals(plain_cast)) {
 			throw NotImplementedException("ALTER COLUMN ... TYPE ... USING is not supported for Hive tables in a Glue "
 			                              "catalog: existing data files can not be rewritten");
 		}
+
 		auto from = GlueTypes::ToLogicalType(column->type);
 		if (!IsAllowedHiveTypeChange(from, change.target_type)) {
 			throw CatalogException("Can not change column \"%s\" of table \"%s\" from %s to %s: existing parquet "

@@ -1,8 +1,8 @@
-# Regression run of the benchmarks under benchmark/ (modelled on duckdb-iceberg's Regression.yml): builds the
-# benchmark runner for the PR and for its merge base with the base branch, and compares the timings of both with
-# duckdb/scripts/regression/test_runner.py. The benchmarks read from the local Glue (moto) + S3 (MinIO) of
-# scripts/docker-compose.yml, so no AWS credentials are needed. On main only the first build runs, to save the ccache and
-# vcpkg caches that PR branches restore from.
+# Regression run of the benchmarks under benchmark/ (modelled on duckdb-iceberg's Regression.yml): one job builds the
+# benchmark runner for the PR and for its merge base with the base branch, then two jobs (parquet and csv/json tables) compare
+# the timings of both with duckdb/scripts/regression/test_runner.py. The benchmarks read from the local Glue (moto) + S3
+# of scripts/docker-compose.yml, so no AWS credentials are needed. On main only the first build runs, to save the ccache
+# and vcpkg caches that PR branches restore from.
 
 name: Regression
 on:
@@ -47,16 +47,14 @@ jobs:
       - name: Preliminary checks on CI
         run: echo "Event name is ${{ github.event_name }}"
 
-  regression-test-benchmark-runner:
-    name: Regression Tests
+  build-benchmark-runners:
+    name: Build Benchmark Runners
     needs: check-draft
     runs-on: ubuntu-latest
     env:
       GEN: ninja
       CC: clang-20
       CXX: clang++-20
-      # the AWS SDK would otherwise ask the EC2 metadata service for a region, which hangs off EC2
-      AWS_EC2_METADATA_DISABLED: "true"
       # lets the base build in base/ hit the ccache entries of the PR build
       CCACHE_BASEDIR: ${{ github.workspace }}
       CCACHE_NOHASHDIR: "true"
@@ -93,14 +91,6 @@ jobs:
           build-type: release
           build: python3 duckdb/scripts/ci/retry.py -- make release
           vcpkg-commit: cd61e1e26a038e82d6550a3ebbe0fbbfe7da78e3 # Release 2026.06.2
-
-      - name: Set up Docker Compose
-        if: env.IS_MAIN != 'true'
-        uses: docker/setup-compose-action@v1
-
-      - name: Start Glue (moto) and S3 (MinIO)
-        if: env.IS_MAIN != 'true'
-        run: docker compose -f scripts/docker-compose.yml up -d --wait
 
       - name: Select base ref
         if: env.IS_MAIN != 'true'
@@ -142,25 +132,77 @@ jobs:
           build: python3 duckdb/scripts/ci/retry.py -- make -C base release
           vcpkg-commit: cd61e1e26a038e82d6550a3ebbe0fbbfe7da78e3
 
+      # the runners load the extensions (httpfs, avro, ...) from the repository directory next to their build
+      - name: Upload benchmark runners
+        if: env.IS_MAIN != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-runners
+          retention-days: 1
+          if-no-files-found: error
+          path: |
+            build/release/benchmark/benchmark_runner
+            build/release/repository
+            base/build/release/benchmark/benchmark_runner
+            base/build/release/repository
+
+  regression-test-benchmark-runner:
+    name: Regression Tests (${{ matrix.name }})
+    needs: build-benchmark-runners
+    if: github.ref != 'refs/heads/main'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      # Two jobs of ~3 minutes each, so only the join-heavy TPC-H and TPC-DS queries: every query costs 10-30s against
+      # moto. parquet runs TPC-DS at SF1, csv TPC-H at SF0.1 and TPC-DS at SF0.01.
+      matrix:
+        include:
+          - name: parquet
+            benchmarks: '^benchmark/([^/]+|pushdown/join_filter_partition_pruning(_two_keys)?|optimizer/(common_subplan|estimate_cardinality_for_join_order_optimizer)|tpcds/sf1/parquet/q64)\.benchmark$'
+          - name: csv/json
+            benchmarks: '^benchmark/((optimizer/estimate_cardinality_for_join_order_optimizer|pushdown/join_filter_partition_pruning)_(csv|json)|tpch/sf0\.1/csv/q(09|18|21)|tpcds/sf0\.01/csv/q(14|64|72|78))\.benchmark$'
+    env:
+      # the AWS SDK would otherwise ask the EC2 metadata service for a region, which hangs off EC2
+      AWS_EC2_METADATA_DISABLED: "true"
+      BENCHMARKS: ${{ matrix.benchmarks }}
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.GIT_REF }}
+          submodules: 'true'
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+
+      - name: Download benchmark runners
+        uses: actions/download-artifact@v4
+        with:
+          name: benchmark-runners
+
+      - name: Restore permissions
+        run: chmod +x build/release/benchmark/benchmark_runner base/build/release/benchmark/benchmark_runner
+
+      - name: Set up Docker Compose
+        uses: docker/setup-compose-action@v1
+
+      # --wait only waits for the containers to run, not for moto to answer: wait for the init container too, which
+      # retries until moto and S3 answer and then creates the bucket and the Glue database 'default'. Without it the
+      # first benchmark (heavily_partitioned_table, whose load attaches right away) got no response from moto.
+      - name: Start Glue (moto) and S3
+        run: |
+          docker compose -f scripts/docker-compose.yml up -d --wait
+          test "$(docker wait glue-init)" = 0
+
       # The benchmark files of the PR checkout are run by both runners (the benchmark runner resolves the paths
       # against the working directory, which test_runner.py isolates per runner).
-      - name: Regression Test Hive Benchmarks
-        if: env.IS_MAIN != 'true'
+      - name: Regression Test benchmarks
         run: |
           mkdir -p .github/regression
-          ls benchmark/*.benchmark > .github/regression/hive_benchmarks.csv
-          ls benchmark/pushdown/*.benchmark >> .github/regression/hive_benchmarks.csv
-          ls benchmark/optimizer/*.benchmark >> .github/regression/hive_benchmarks.csv
-          python duckdb/scripts/regression/test_runner.py --old base/build/release/benchmark/benchmark_runner --new build/release/benchmark/benchmark_runner --benchmarks .github/regression/hive_benchmarks.csv --verbose --threads 2
-
-      # A step of its own so a TPC-H failure is visible on its own; it also runs when the step above fails
-      - name: Tpch benchmarks
-        if: ${{ !cancelled() && env.IS_MAIN != 'true' }}
-        run: |
-          mkdir -p .github/regression
-          ls benchmark/tpch/sf1/*.benchmark > .github/regression/tpch_benchmarks.csv
-          python duckdb/scripts/regression/test_runner.py --old base/build/release/benchmark/benchmark_runner --new build/release/benchmark/benchmark_runner --benchmarks .github/regression/tpch_benchmarks.csv --verbose --threads 2 --samples 10
+          find benchmark -name '*.benchmark' | sort | grep -E "${BENCHMARKS}" > .github/regression/benchmarks.csv
+          python duckdb/scripts/regression/test_runner.py --old base/build/release/benchmark/benchmark_runner --new build/release/benchmark/benchmark_runner --benchmarks .github/regression/benchmarks.csv --verbose --threads 2 --samples 5
 
       - name: Server logs
-        if: ${{ always() && env.IS_MAIN != 'true' }}
+        if: always()
         run: docker compose -f scripts/docker-compose.yml logs --no-color moto | tail -200

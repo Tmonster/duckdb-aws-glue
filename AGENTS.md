@@ -8,8 +8,10 @@ This file provides guidance to coding agents when working with code in this repo
 A DuckDB extension (`glue`, attached with `ATTACH '<account_id>' AS cat (TYPE GLUE)`) that exposes an AWS Glue Data
 Catalog as a DuckDB catalog through the AWS SDK Glue client. Hive (Glue native) tables are readable/writable
 (parquet, csv, json, avro SerDes); Iceberg tables are served by a hidden duckdb-iceberg catalog over Glue's Iceberg
-REST endpoint; Delta/Hudi tables are listed (`duckdb_tables().tags['table_type']`) but scans and DML throw. The top-level `README.md` is empty — `docs/README.md` is the real user-facing spec (attach
-options, read/write semantics, partition functions, testing, benchmarks). Keep it in sync when behavior changes.
+REST endpoint; Delta/Hudi/symlink-manifest tables (told apart by table parameters and the InputFormat) are listed
+(`duckdb_tables().tags['table_type']`) but scans and DML throw. The top-level `README.md` is empty — `docs/README.md`
+is the real user-facing spec (attach options, read/write semantics, partition functions, testing, benchmarks). Keep it
+in sync when behavior changes.
 
 ## Build
 
@@ -26,8 +28,8 @@ BUILD_BENCHMARK=1 ... make relassert                                            
 Each `src/` subdirectory has its own `CMakeLists.txt` (an `add_library_unity` object library appended to
 `GLUE_EXTENSION_FILES`, like DuckDB's own source tree): add new `.cpp` files there, and a new directory with
 `add_subdirectory` in `src/CMakeLists.txt`. `extension_config.cmake` also links `tpch`, `tpcds` and `avro` (avro is
-loaded on demand for AvroSerDe tables) and `iceberg` (pinned with `APPLY_PATCHES` to the hash the duckdb submodule
-pins; needs `roaring` from vcpkg).
+loaded on demand for AvroSerDe tables) and `iceberg` (pinned to the hash the duckdb submodule pins, with
+`APPLY_PATCHES` when it has patches for it; needs `roaring` from vcpkg).
 
 Run `make format-fix` (clang-format over `src` and `test`, via the duckdb submodule) before committing.
 
@@ -38,10 +40,11 @@ SQLLogicTests under `test/sql/`. They need a `--test-config` that sets `GLUE_CAT
 
 - `test/configs/local_glue.json`: moto (Glue, port 5555) + SeaweedFS (S3, port 9100) from `scripts/docker-compose.yml`.
   `make glue-fixture` / `make glue-fixture-down`; `make test-local` runs everything through DuckDB's
-  `scripts/ci/run_tests.py` (Python 3.10+, `PYTHON=...`), serially, retrying a failing test twice: against the local
-  servers a read right after a write occasionally comes back empty.
-- `.github/workflows/CloudGlueTests.yml`: maintainer-only `workflow_dispatch` (input `pr_number`) running all tests
-  of a PR against the account configured in the `cloud-glue` environment (`make test-cloud CLOUD_TEST_CONFIG=...`).
+  `scripts/ci/run_tests.py` (Python 3.10+, `PYTHON=...`), serially in batches of 10 tests per process, retrying a
+  failing batch twice: against the local servers a read right after a write occasionally comes back empty.
+- `.github/workflows/CloudGlueTests.yml`: maintainer-only `workflow_dispatch` (input `pr_number`, or none to test the
+  selected branch) running all tests against the account configured in the `cloud-glue` environment
+  (`make test-cloud CLOUD_TEST_CONFIG=...`).
 - `test/configs/cloud_glue.json`: live AWS (credential chain, eu-north-1). `test/sql/cloud/` only runs here
   (`require-env GLUE_TEST_CONFIG cloud`) and reads pre-existing tables in the account.
 
@@ -98,8 +101,9 @@ Benchmarks (`benchmark/`, incl. TPC-H/TPC-DS SF1 against local Glue) run with
   partition filters are pushed down to Glue's partition values before any S3 listing. The `hive_scan` table function
   (`src/functions/hive_scan_function.cpp`) reuses the same reader with schema/partitions given as arguments.
 - **Writing** `src/planning/glue_hive_insert.cpp`: INSERT and CTAS plan a `PhysicalCopyToFile` in the table's format
-  with hive partition directories, then register new partitions with `BatchCreatePartition` in Finalize. CTAS creates
-  the Glue table at plan time.
+  with hive partition directories, then register new partitions with `BatchCreatePartition` in Finalize. The copy is
+  `GlueHiveCopy` (`src/execution/hive_copy.cpp`); for CTAS it carries the bound CREATE TABLE and creates the Glue table
+  when the sink starts, before any output is initialized, as `PhysicalInsert` does.
 - **Partition DDL**: DuckDB has no `ALTER TABLE ... PARTITION` syntax, so `src/functions/glue_partition_functions.cpp`
   provides `glue_partitions`, `glue_add_partition`, ... and `glue_alter_table`; `src/grammar/glue_grammar.cpp` (grammar
   extension `glue_hive_ddl`, enabled with `SET active_grammar_extensions = ['glue_hive_ddl']`) rewrites Hive partition

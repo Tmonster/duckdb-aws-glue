@@ -109,6 +109,63 @@ SELECT id, note FROM hive_scan('{TEST_DIR}/fmt_json', format := 'json',
 ----
 3	NULL
 
+# a line that is not valid JSON fails the scan, or is a row of NULLs with ignore_errors
+statement ok
+COPY (SELECT * FROM (VALUES ('{"id": 1, "name": "a"}'), ('not json'), ('{"id": 3, "name": "c"}')) t(line))
+TO '{TEST_DIR}/fmt_json_malformed' (FORMAT csv, HEADER false, QUOTE '', ESCAPE '', PER_THREAD_OUTPUT true);
+
+statement error
+SELECT id, name FROM hive_scan('{TEST_DIR}/fmt_json_malformed', format := 'json', schema := {id: 'INTEGER', name: 'VARCHAR'});
+----
+<REGEX>:.*Malformed JSON.*
+
+query II
+SELECT id, name FROM hive_scan('{TEST_DIR}/fmt_json_malformed', format := 'json', schema := {id: 'INTEGER', name: 'VARCHAR'},
+    ignore_errors := true)
+ORDER BY id NULLS FIRST;
+----
+NULL	NULL
+1	a
+3	c
+
+#---------------------------------------------------------------------------
+# filters on data columns: every format scans with its own reader, so a filter it does not take is applied after it
+#---------------------------------------------------------------------------
+foreach fmt parquet csv json
+
+query I
+SELECT count(*) FROM hive_scan('{TEST_DIR}/fmt_${fmt}', format := '${fmt}',
+    schema := {id: 'INTEGER', amount: 'DOUBLE', dt: 'VARCHAR'},
+    partitions := [{dt: '2016-05-14'}, {dt: '2016-05-15'}])
+WHERE id + 1 > 2;
+----
+2
+
+query I
+SELECT sum(id) FROM hive_scan('{TEST_DIR}/fmt_${fmt}', format := '${fmt}',
+    schema := {id: 'INTEGER', amount: 'DOUBLE', dt: 'VARCHAR'},
+    partitions := [{dt: '2016-05-14'}, {dt: '2016-05-15'}])
+WHERE amount > 15 AND id::VARCHAR <> '3';
+----
+2
+
+# a hive_scan() call is serialized like the scan of a Glue table and bound again from it
+statement ok
+SET debug_verify_serializer = true;
+
+query II
+SELECT id, dt FROM hive_scan('{TEST_DIR}/fmt_${fmt}', format := '${fmt}',
+    schema := {id: 'INTEGER', amount: 'DOUBLE', dt: 'VARCHAR'},
+    partitions := [{dt: '2016-05-14'}, {dt: '2016-05-15'}])
+WHERE id + 1 > 2 AND dt = '2016-05-14';
+----
+2	2016-05-14
+
+statement ok
+SET debug_verify_serializer = false;
+
+endloop
+
 #---------------------------------------------------------------------------
 # avro: the files carry their schema, columns are matched by name
 #---------------------------------------------------------------------------
