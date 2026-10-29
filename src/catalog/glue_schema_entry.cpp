@@ -366,6 +366,13 @@ static void ThrowIfUnsupportedColumn(const ColumnDefinition &column) {
 	ThrowIfCollated(column.Type(), name);
 }
 
+static void ThrowIfSorted(const CreateTableInfo &base) {
+	if (!base.sort_keys.empty()) {
+		throw CatalogException("SORTED BY is not supported for Hive tables in a Glue catalog, the sort order of a "
+		                       "bucketed table is the SortColumns option");
+	}
+}
+
 //! Tables and views share one catalog set (as in DuckDB's own schema), so a lookup by name returns either; the
 //! statements that mean one of the two check it here
 static void CheckEntryType(optional_ptr<CatalogEntry> existing, CatalogType expected, const string &name,
@@ -476,6 +483,7 @@ static bool ReplacesExistingView(const CreateViewInfo &info, const GlueView &exi
 }
 
 GlueTableInfo GlueSchemaEntry::BuildTableInfo(ClientContext &context, const CreateTableInfo &base) {
+	ThrowIfSorted(base);
 	if (!base.constraints.empty()) {
 		throw NotImplementedException("Constraints are not supported when creating tables in a Glue catalog");
 	}
@@ -601,11 +609,19 @@ optional_ptr<CatalogEntry> GlueSchemaEntry::CreateTableInternal(CatalogTransacti
 	auto &base = info.Base();
 	auto table_name = base.GetTableName().GetIdentifierName();
 
+	if (GetCreateTableFormat(context, base) == GlueFormat::ICEBERG) {
+		// duckdb-iceberg validates the definition and then handles a conflict with an Iceberg table itself
+		EntryLookupInfo lookup(CatalogType::TABLE_ENTRY, QualifiedName(Identifier(table_name)));
+		auto existing = tables.GetEntry(context, lookup);
+		CheckEntryType(existing, CatalogType::TABLE_ENTRY, table_name, "create");
+		if (existing && !AsIcebergTable(existing)) {
+			return OnExistingTable(base, database_info.name, table_name);
+		}
+		return CreateIcebergTable(context, info);
+	}
+	ThrowIfSorted(base);
 	if (CheckCreateTableConflict(context, base)) {
 		return nullptr;
-	}
-	if (GetCreateTableFormat(context, base) == GlueFormat::ICEBERG) {
-		return CreateIcebergTable(context, info);
 	}
 	auto table = resolved_table_info ? *resolved_table_info : BuildTableInfo(context, base);
 	D_ASSERT(table.name == table_name);

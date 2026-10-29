@@ -142,7 +142,7 @@ zstd
 statement error
 CREATE TABLE my_datalake.default.ice_create (id INTEGER) WITH (table_type = 'iceberg');
 ----
-<REGEX>:.*Catalog Error.*Table with name "ice_create" already exists in Glue database "default".*
+<REGEX>:.*Catalog Error.*Table with name "ice_create" already exists.*
 
 statement ok
 CREATE TABLE IF NOT EXISTS my_datalake.default.ice_create (other BIGINT) WITH (table_type = 'iceberg');
@@ -156,7 +156,7 @@ CREATE TABLE my_datalake.default.ice_create_hive (id INTEGER) WITH (table_type =
 statement error
 CREATE OR REPLACE TABLE my_datalake.default.ice_create (id INTEGER) WITH (table_type = 'iceberg');
 ----
-<REGEX>:.*Not implemented Error.*CREATE OR REPLACE TABLE is not supported for Glue catalogs.*
+<REGEX>:.*Not implemented Error.*CREATE OR REPLACE.*not supported.*
 
 # a failed statement does not break the next lookups of the table
 query II

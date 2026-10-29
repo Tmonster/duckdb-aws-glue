@@ -246,7 +246,7 @@ SELECT * FROM my_datalake.default.events AT (VERSION => <snapshot id>);
 
 - `CREATE TABLE ... WITH (table_type = 'iceberg')` and `CREATE TABLE ... AS` create the table through the REST
   endpoint, at `location` or the same default location as a Hive table. `PARTITIONED BY` makes an Iceberg partition
-  spec; other `WITH` keys (e.g. `'format-version' = 2`) are Iceberg table properties. The Hive options (`format`,
+  spec and `SORTED BY` its sort order (Hive tables refuse `SORTED BY`); other `WITH` keys (e.g. `'format-version' = 2`) are Iceberg table properties. The Hive options (`format`,
   `delimiter`, `quote`, `escape`, `header`, the bucketing options) are refused. As for Hive tables, `CREATE TABLE ...
   AS` creates the table before the query runs.
 - `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `MERGE INTO`, time travel (`AT (VERSION => ...)`), `ALTER TABLE` (add, drop
