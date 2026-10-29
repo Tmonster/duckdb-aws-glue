@@ -252,7 +252,9 @@ SELECT * FROM my_datalake.default.events AT (VERSION => <snapshot id>);
 - `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `MERGE INTO`, time travel (`AT (VERSION => ...)`), `ALTER TABLE` (add, drop
   and rename columns, widening type changes) and `DROP TABLE` are those of the iceberg extension, as are its
   functions (`iceberg_snapshots('my_datalake.default.events')`, ...). Glue's endpoint does not support
-  `ALTER TABLE ... RENAME TO`. Time travel on a Hive table or a view is an error.
+  `ALTER TABLE ... RENAME TO`. Time travel on a Hive table or a view is an error. When the Iceberg catalog can not
+  load a table (e.g. its metadata files were deleted), `DROP TABLE` deletes its Glue entry instead, and reading it
+  reports the error.
 - Iceberg tables can only be used in auto-commit statements: in an explicit transaction (`BEGIN ... COMMIT`) every
   statement that uses one fails, also when it only reads.
 - The listing (`duckdb_columns()`, `information_schema.columns`) uses the columns Glue stores for the table, in Glue's

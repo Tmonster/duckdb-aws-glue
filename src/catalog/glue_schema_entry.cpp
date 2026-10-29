@@ -4,6 +4,7 @@
 
 #include "duckdb/catalog/catalog_transaction.hpp"
 #include "duckdb/catalog/dependency_list.hpp"
+#include "duckdb/logging/logger.hpp"
 #include "duckdb/main/client_context.hpp"
 #include "duckdb/parser/parsed_data/comment_on_column_info.hpp"
 #include "duckdb/parser/parsed_data/alter_info.hpp"
@@ -1137,6 +1138,12 @@ void GlueSchemaEntry::Scan(CatalogType type, const std::function<void(CatalogEnt
 	throw NotImplementedException("Scan without context not supported for Glue databases");
 }
 
+//! The errors of loading an Iceberg table (REST endpoint, missing metadata files) after which the Glue entry is
+//! returned instead
+static bool CanUseGlueEntryOfIcebergTable(ExceptionType type) {
+	return type == ExceptionType::HTTP || type == ExceptionType::IO || type == ExceptionType::CATALOG;
+}
+
 optional_ptr<CatalogEntry> GlueSchemaEntry::LookupEntry(CatalogTransaction transaction,
                                                         const EntryLookupInfo &lookup_info) {
 	if (!CatalogTypeIsSupported(lookup_info.GetCatalogType())) {
@@ -1155,8 +1162,19 @@ optional_ptr<CatalogEntry> GlueSchemaEntry::LookupEntry(CatalogTransaction trans
 		// reach this table set: the next lookup or listing after this transaction asks Glue again
 		auto table_name = entry->name.GetIdentifierName();
 		GlueTransaction::Get(context, catalog).AddIcebergTable(database_info.name, table_name);
-		return catalog.Cast<GlueCatalog>().GetIcebergTable(context, database_info.name, table_name,
-		                                                   lookup_info.GetAtClause());
+		try {
+			return catalog.Cast<GlueCatalog>().GetIcebergTable(context, database_info.name, table_name,
+			                                                   lookup_info.GetAtClause());
+		} catch (std::exception &ex) {
+			ErrorData error(ex);
+			if (lookup_info.GetAtClause() || !CanUseGlueEntryOfIcebergTable(error.Type())) {
+				throw;
+			}
+			// e.g. its metadata files are gone: DROP deletes the Glue entry, a scan reports the error
+			DUCKDB_LOG_WARNING(context, "Glue table '%s.%s': loading it from the Iceberg catalog failed: %s",
+			                   database_info.name, table_name, error.RawMessage());
+			return entry;
+		}
 	}
 	return entry;
 }
