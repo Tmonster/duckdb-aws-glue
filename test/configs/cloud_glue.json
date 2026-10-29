@@ -18,7 +18,7 @@
 		},
 		{
 			"env_name": "GLUE_CATALOG_ID",
-			"env_value": "176760123605"
+			"env_value": "847122343688"
 		},
 		{
 			"env_name": "GLUE_ENDPOINT",
@@ -26,7 +26,7 @@
 		},
 		{
 			"env_name": "DEFAULT_S3_LOCATION",
-			"env_value": "s3://duckdb-glue-test-176760123605/warehouse"
+			"env_value": "s3://tom-glue-tables-test-bucket"
 		},
 		{
 			"env_name": "ICEBERG_SUPPORTED",

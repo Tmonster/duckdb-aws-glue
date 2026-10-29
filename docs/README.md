@@ -41,6 +41,8 @@ A parquet `BYTE_ARRAY` column without a `STRING` annotation (as Impala and older
 UTF-8 text when Glue declares the column `string` (bytes that are not UTF-8 are an error), and as bytes when it
 declares it `binary`, whatever the session's `binary_as_string`. In a table that declares a `binary` column (or field),
 such bytes inside an `array`, `struct` or `map` column keep the escaped form the reader gives a BLOB.
+A `float` or `double` column may hold NaN wherever the file does not count its NaN values (`nan_count`, which most
+writers leave out): such a column's min/max never skip a row group for a filter that NaN could match.
 Text tables are read the way their SerDe reads them:
 
 - LazySimpleSerDe: the delimiter is `field.delim`, else `serialization.format`, else `\001`; a number from -128 to 127
@@ -312,6 +314,38 @@ SELECT * FROM hive_scan('s3://bucket/warehouse/orders',
   `partitions := []` with `partition_keys` reads no rows.
 - A root or partition without data files scans as zero rows.
 
+## Reading a scan's files with a standard reader (C++)
+
+An engine that hands some of a Hive scan's files to machines without this extension (and without Glue access) can
+read them there with a standard reader. `functions/hive_reader_call.hpp` gives what that read needs from a bound scan,
+of a Glue table or of a `hive_scan()` call, using only core DuckDB types:
+
+- `HiveScanGetReaderCall(get)`: the reader (`read_parquet`, `read_csv`, `read_json` or `read_avro`), its named
+  parameters and the scan's data columns as expressions over the reader's columns. The parameters are those the scan
+  bound the reader with (a text table's dialect, header lines and NULL spelling, `hive_csv_parallel` as the planning
+  session had it), plus the data columns as `schema` for Parquet and Avro and `hive_partitioning := false`. A column
+  of a SerDe text table is the field read as text and converted with `TRY_CAST` (`CAST` without
+  `use.null.for.invalid.data` in an OpenCSVSerde table, `lower(field) = 'true'` for an OpenCSVSerde boolean), of the
+  field wrapped in `__internal_barrier`, so the caller's optimizer does not push the conversion into `read_csv`,
+  which would convert the text itself and strictly.
+- `HiveScanGetFilePartitionValues(get, path)`: the values of the partition a listed file belongs to, as constants of
+  the partition columns' types. The path is the file's as the scan listed it, or another spelling of it that DuckDB's
+  `Path` normalizes to it (`s3://b//x` or `s3://b/./x` for `s3://b/x`).
+
+The caller reads a set of the scan's files as `SELECT <columns>, <partition values> FROM <reader>([<files>],
+<parameters>)`, one such read per partition, `UNION ALL`ed. Neither function calls Glue or needs a `ClientContext`.
+Both return nothing for a scan they do not recognize or that reads a column, a partition key included, as another
+type than the table declares (a type the optimizer pushed into the scan), and `HiveScanGetReaderCall` also for a
+Parquet table with a `binary` column, whose string columns are decoded file by file. Both only work when the caller
+and this extension are linked into the same binary.
+
+`EXPLAIN (SQL)` renders a Hive scan as these reads, so the SQL it prints reads the scan's files without this extension
+(and `SET debug_verify_statement = 'explain_sql_strict'` runs a query as that SQL). The scan lists its files for it:
+a partition the filters pruned is not read, a filter the partition values decided is restated over the reads, and a
+scan without files is a relation without rows. A scan no reader call can read (a Parquet table with a `binary`
+column, or one whose query reads `$path`, `$file_size`, `$file_modified_time` or another virtual column) is rendered
+as the Glue table it reads, by name; a `hive_scan()` call then cannot be rendered.
+
 ## Partitions
 
 DuckDB has no `ALTER TABLE ... PARTITION` syntax, so the Hive partition statements are table functions. The
@@ -418,7 +452,9 @@ A config creates the S3 secret (`on_init`) and sets `GLUE_CATALOG_ID`, `GLUE_END
 which the tests use in their ATTACH; tests are skipped without a config (`require-env GLUE_CATALOG_ID`). Tests under
 `test/sql/cloud/` read tables of the live account that the tests do not create and only run with the cloud config.
 The local config also sets `GLUE_FAULT_ENDPOINT`: `scripts/glue_fault_proxy.py` in front of moto, which answers
-GetTables on a database named `fault_*` with a Glue error; tests that need it are skipped without it.
+GetTables on a database named `fault_*` with a Glue error; tests that need it are skipped without it. It also sets
+`GLUE_LINK_PROXY_ENDPOINT`: `scripts/resource_link_proxy.py` in front of moto, which answers for the database
+`link_db` as Glue does through a database resource link whose target is `target_db`.
 moto does not serve Glue's Iceberg REST endpoint, so the tests that use Iceberg tables (`test/sql/iceberg/` and
 `test/sql/combined_table_types/`, Hive and Iceberg tables in one query) `require-env ICEBERG_SUPPORTED`, which only
 the cloud config sets. These tests also `set ignore_error_messages`:
