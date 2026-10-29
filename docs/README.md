@@ -144,8 +144,10 @@ their codec themselves.
 - `ALTER SCHEMA ... SET (<key> = '...', ...)` merges options into the Glue database (UpdateDatabase), with the same
   keys as `CREATE SCHEMA`; `ALTER SCHEMA ... RESET (<key>, ...)` removes them. Keys are case-insensitive.
 - `CREATE TABLE ... [PARTITIONED BY (col, ...)] [WITH (format = 'parquet' | 'csv' | 'json' | 'avro', location = '...',
-  <property> = '...')]` creates a Hive table (`table_type = 'hive'`, the default; `table_type = 'iceberg'` creates an
-  [Iceberg table](#iceberg-tables)): a parquet (default), csv (LazySimpleSerDe, `,` delimited, no header), json
+  <property> = '...')]` creates a Hive table (`table_type = 'hive'`; `table_type = 'iceberg'` creates an
+  [Iceberg table](#iceberg-tables); without `table_type` the setting `glue_default_table_type` decides, `'hive'` by
+  default, and `SET glue_default_table_type = 'iceberg'` creates Iceberg tables): a parquet (default), csv
+  (LazySimpleSerDe, `,` delimited, no header), json
   (JsonSerDe, one object per line) or avro (AvroSerDe)
   Hive table at `location`, else `<DEFAULT_LOCATION>/<database>/<table>`, else `<database LocationUri>/<table>`;
   without any of these the statement fails, as it does for an empty `location`. Partition keys must be plain column

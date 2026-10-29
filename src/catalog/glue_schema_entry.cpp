@@ -83,23 +83,37 @@ bool GlueSchemaEntry::IsBucketingOption(const string &key) {
 	       StringUtil::CIEquals(key, "SortColumns");
 }
 
-GlueFormat GlueSchemaEntry::GetCreateTableFormat(ClientContext &context, const CreateTableInfo &create_info) {
-	auto entry = create_info.options.find("table_type");
-	if (entry == create_info.options.end()) {
-		return GlueFormat::HIVE;
-	}
-	case_insensitive_map_t<unique_ptr<ParsedExpression>> option;
-	option.emplace(entry->first, entry->second->Copy());
-	auto table_type = StringUtil::Lower(EvaluateOptions(context, option, "CREATE TABLE")[0].second.ToString());
+GlueFormat GlueSchemaEntry::ParseTableType(const string &value, const string &source) {
+	auto table_type = StringUtil::Lower(value);
 	if (table_type == "hive") {
 		return GlueFormat::HIVE;
 	}
 	if (table_type == "iceberg") {
 		return GlueFormat::ICEBERG;
 	}
-	throw BinderException("Unknown Glue table type '%s' for option 'table_type', accepted values are 'hive' and "
-	                      "'iceberg'",
-	                      table_type);
+	throw BinderException("Unknown Glue table type '%s' for %s, accepted values are 'hive' and 'iceberg'", value,
+	                      source);
+}
+
+void GlueSchemaEntry::CheckDefaultTableType(ClientContext &, SetScope, Value &parameter) {
+	if (!parameter.IsNull()) {
+		ParseTableType(parameter.ToString(), "setting 'glue_default_table_type'");
+	}
+}
+
+GlueFormat GlueSchemaEntry::GetCreateTableFormat(ClientContext &context, const CreateTableInfo &create_info) {
+	auto entry = create_info.options.find("table_type");
+	if (entry == create_info.options.end()) {
+		Value default_table_type;
+		if (context.TryGetCurrentSetting("glue_default_table_type", default_table_type) &&
+		    !default_table_type.IsNull()) {
+			return ParseTableType(default_table_type.ToString(), "setting 'glue_default_table_type'");
+		}
+		return GlueFormat::HIVE;
+	}
+	case_insensitive_map_t<unique_ptr<ParsedExpression>> option;
+	option.emplace(entry->first, entry->second->Copy());
+	return ParseTableType(EvaluateOptions(context, option, "CREATE TABLE")[0].second.ToString(), "option 'table_type'");
 }
 
 //! The Glue option another spelling of a bucketing option stands for, empty if the key is none of them
@@ -739,6 +753,7 @@ bool GlueSchemaEntry::IsAllowedHiveTypeChange(const LogicalType &from, const Log
 
 //! The parameters GlueTableInfo::GetFormat() derives the table format from can not be set or reset: changing
 //! table_type on a Hive table would relabel it as Iceberg or Delta without a metadata file behind it.
+// TODO: ALTER of an Iceberg table goes to duckdb-iceberg, which still accepts SET / RESET (table_type)
 static void CheckTablePropertyChangeable(const string &key) {
 	if (key.empty()) {
 		throw InvalidInputException("A table property needs a name");

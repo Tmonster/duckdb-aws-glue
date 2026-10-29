@@ -3,6 +3,7 @@
 #include "duckdb/catalog/catalog_entry/schema_catalog_entry.hpp"
 #include "duckdb/common/case_insensitive_map.hpp"
 #include "duckdb/common/enums/on_entry_not_found.hpp"
+#include "duckdb/common/enums/set_scope.hpp"
 #include "duckdb/parser/parsed_expression.hpp"
 
 #include "core/glue_info.hpp"
@@ -75,8 +76,11 @@ public:
 	static GlueCreateTableOptions ParseCreateTableOptions(ClientContext &context, const CreateTableInfo &create_info);
 	//! BucketColumns, NumberOfBuckets or SortColumns (case-insensitive)
 	static bool IsBucketingOption(const string &key);
-	//! The 'table_type' option of CREATE TABLE: HIVE (the default) or ICEBERG
+	//! The 'table_type' option of CREATE TABLE, else the glue_default_table_type setting: HIVE or ICEBERG
 	static GlueFormat GetCreateTableFormat(ClientContext &context, const CreateTableInfo &create_info);
+	//! 'hive' or 'iceberg' (case-insensitive); 'source' names the option or setting in the error
+	static GlueFormat ParseTableType(const string &value, const string &source);
+	static void CheckDefaultTableType(ClientContext &context, SetScope scope, Value &parameter);
 	//! The existing entry when CREATE TABLE IF NOT EXISTS names one, nullptr when there is none; throws otherwise
 	optional_ptr<CatalogEntry> CheckCreateTableConflict(ClientContext &context, const CreateTableInfo &create_info);
 	//! The CREATE TABLE of an Iceberg table, rebound to the schema of the Iceberg catalog
