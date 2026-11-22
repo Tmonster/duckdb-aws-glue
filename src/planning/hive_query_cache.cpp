@@ -24,6 +24,10 @@ public:
 		return listings.Get(context, directory);
 	}
 
+	void DropListing(const string &directory, const MultiFileList &listing) {
+		listings.Drop(directory, listing);
+	}
+
 	void Clear() {
 		listings.Clear();
 	}
@@ -70,6 +74,22 @@ shared_ptr<MultiFileList> HiveDirectoryListings::Get(ClientContext &context, con
 		entry->listing = shared_ptr<MultiFileList>(ListLocation(fs, directory));
 	}
 	return entry->listing;
+}
+
+void HiveDirectoryListings::Drop(const string &directory, const MultiFileList &listing) {
+	shared_ptr<HiveDirectoryListingEntry> entry;
+	{
+		annotated_lock_guard<annotated_mutex> guard(lock);
+		auto found = listings.find(directory);
+		if (found == listings.end()) {
+			return;
+		}
+		entry = found->second;
+	}
+	annotated_lock_guard<annotated_mutex> guard(entry->lock);
+	if (entry->listing.get() == &listing) {
+		entry->listing.reset();
+	}
 }
 
 void HiveDirectoryListings::Clear() {
@@ -140,10 +160,15 @@ shared_ptr<HiveFooterEntry> HiveQueryCache::GetFooters(const string &key) {
 	return entry;
 }
 
-shared_ptr<MultiFileList> HiveQueryCache::GetDirectoryListing(ClientContext &context, const string &directory,
-                                                              bool cache_in_connection) {
+static string DirectoryKey(const string &directory) {
 	auto key = directory;
 	StringUtil::RTrim(key, "/");
+	return key;
+}
+
+shared_ptr<MultiFileList> HiveQueryCache::GetDirectoryListing(ClientContext &context, const string &directory,
+                                                              bool cache_in_connection) {
+	auto key = DirectoryKey(directory);
 	if (cache_in_connection) {
 		// the connection's listings (glue_cache_listings): kept for later statements, cleared with the metadata cache
 		return context.GetContext()
@@ -152,6 +177,19 @@ shared_ptr<MultiFileList> HiveQueryCache::GetDirectoryListing(ClientContext &con
 		    ->GetListing(context, key);
 	}
 	return directory_listings.Get(context, key);
+}
+
+void HiveQueryCache::DropDirectoryListing(ClientContext &context, const string &directory, const MultiFileList &listing,
+                                          bool cache_in_connection) {
+	auto key = DirectoryKey(directory);
+	if (cache_in_connection) {
+		auto cache = context.GetContext().GetRegisteredState().Get<HiveListingCache>(HIVE_LISTING_CACHE);
+		if (cache) {
+			cache->DropListing(key, listing);
+		}
+		return;
+	}
+	directory_listings.Drop(key, listing);
 }
 
 shared_ptr<const vector<GluePartitionInfo>> FindTablePartitions(ClientContext &context, const HiveScanInfo &info) {

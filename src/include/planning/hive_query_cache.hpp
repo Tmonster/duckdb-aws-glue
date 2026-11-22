@@ -47,6 +47,8 @@ struct HiveDirectoryListingEntry {
 class HiveDirectoryListings {
 public:
 	shared_ptr<MultiFileList> Get(ClientContext &context, const string &directory);
+	//! Forget the listing of 'directory' if it is still 'listing', so that the next Get lists the directory again
+	void Drop(const string &directory, const MultiFileList &listing);
 	void Clear();
 
 private:
@@ -83,6 +85,10 @@ public:
 	//! listing is kept beyond the query (glue_cache_listings)
 	shared_ptr<MultiFileList> GetDirectoryListing(ClientContext &context, const string &directory,
 	                                              bool cache_in_connection = false);
+	//! Called when expanding 'listing' threw: a failed listing may keep its error (httpfs keeps a failed prefix's), so
+	//! the next reader of 'directory' lists it again
+	void DropDirectoryListing(ClientContext &context, const string &directory, const MultiFileList &listing,
+	                          bool cache_in_connection = false);
 	//! The id of the next scan bound in this query, starting at 1
 	idx_t NextScanId();
 
